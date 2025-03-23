@@ -96,7 +96,9 @@ a {
   color: #bbb;
   margin-left: -500px;
   font-size: 12px;
-  text-align: right; }
+  text-align: right;
+  cursor: pointer;
+ }
   @media screen and (max-width: 1024px) {
     .download-pdf {
       display: none; } }
@@ -384,5 +386,10 @@ a {
   @media print {
     .github-footer {
       display: none; } }
+
+.general-box {
+  display: flex;
+  justify-content: space-between;
+}   
 
 /*# sourceMappingURL=main.css.map*/
