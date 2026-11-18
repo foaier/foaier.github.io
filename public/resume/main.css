@@ -495,3 +495,117 @@ a {
   display: flex;
   justify-content: space-between;
 }
+
+@media (max-width: 767px) {
+  body {
+    padding-top: 0;
+  }
+
+  .last-modified,
+  .download-pdf {
+    position: static;
+    display: inline-block;
+    width: auto;
+    margin: 12px 10px 0;
+  }
+
+  .content {
+    width: calc(100% - 16px);
+    margin: 18px auto;
+    border-radius: 3px;
+  }
+
+  .content-hd {
+    padding: 24px 20px;
+  }
+
+  .content-hd .title {
+    font-size: 38px;
+  }
+
+  .content-hd .name,
+  .content-hd .job,
+  .content-hd .info,
+  .content-hd .contact {
+    float: none;
+    width: 100%;
+    text-align: left;
+  }
+
+  .content-hd .job h2 {
+    font-size: 19px;
+  }
+
+  .content-hd .info,
+  .content-hd .contact {
+    padding: 0;
+  }
+
+  .content-hd .contact ul {
+    margin-top: 8px;
+  }
+
+  .content-bd {
+    padding: 16px 10px 32px;
+  }
+
+  .content-bd .content-left,
+  .content-bd .content-right {
+    float: none;
+    width: 100%;
+  }
+
+  .content-bd section {
+    padding: 8px 6px;
+  }
+
+  .content-bd .section-title {
+    width: auto;
+    min-width: 94px;
+  }
+
+  .content-bd .item-hd .item-time {
+    float: none;
+    width: 100%;
+  }
+
+  .content-bd .item-hd .item-more {
+    top: 8px;
+  }
+
+  .content-bd .section-content {
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .general-box {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+}
+
+@media print {
+  body {
+    padding: 0;
+    background: #fff;
+    color: #111;
+  }
+
+  .last-modified,
+  .download-pdf,
+  .github-footer {
+    display: none;
+  }
+
+  .content {
+    width: 100%;
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .content-hd {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
