@@ -1,4 +1,4 @@
-# 杨乘峰 · 个人技术博客
+# Foaier · 个人技术博客
 
 基于 Next.js、React 和 TypeScript 构建，并以静态文件发布到 GitHub Pages。
 

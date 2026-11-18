@@ -3,7 +3,7 @@ import { projects } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "项目",
-  description: "杨乘峰参与的企业系统、数据迁移与产品升级平台项目。",
+  description: "Foaier 参与的企业系统、数据迁移与产品升级平台项目。",
 };
 
 export default function ProjectsPage() {
