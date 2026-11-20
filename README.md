@@ -26,6 +26,10 @@
 
     从这里开始写正文。
 
+`series` 与 `order` 为可选字段，例如在 Agent 开发系列追加文章时填写 `series: Agent 开发`，并为 `order` 使用该系列下一个序号。同一系列的序号应连续且不重复；普通随笔不填写这两个字段，归入“工程笔记”。文章页支持目录、阅读时长、代码高亮与复制、表格和系列前后篇导航。文章列表支持按系列筛选，以及搜索标题、简介与标签。
+
+发布前运行 `npm run content:check`、`npm run lint`、`npm run typecheck` 和 `npm run build`。
+
 推送到 main 后，GitHub Actions 会检查并构建站点，再自动部署到 GitHub Pages。
 Pull Request 会运行相同的检查和构建，但不会部署。
 

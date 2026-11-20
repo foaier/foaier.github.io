@@ -16,7 +16,7 @@ export function SiteHeader() {
         <Link className="profile-link" href="/" aria-label="Foaier 的博客首页">
           <Image
             className="profile-avatar"
-            src="https://avatars.githubusercontent.com/u/8818576?v=4"
+            src="/images/avatar.png"
             alt="Foaier 的 GitHub 头像"
             width={100}
             height={100}

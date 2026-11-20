@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./reading.css";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { siteUrl } from "@/lib/site";
@@ -10,13 +11,13 @@ export const metadata: Metadata = {
     default: "Foaier · 个人技术博客",
     template: "%s | Foaier",
   },
-  description: "Foaier 的个人技术博客，记录企业系统、后端工程、数据迁移与平台建设实践。",
+  description: "Foaier 的个人技术博客，用人话聊 AI、知识库、Agent 与后端工程，记录学习和实践。",
   openGraph: {
     type: "website",
     locale: "zh_CN",
     siteName: "Foaier · 个人技术博客",
     title: "Foaier · 个人技术博客",
-    description: "记录企业系统、后端工程、数据迁移与平台建设实践。",
+    description: "用人话聊 AI、知识库、Agent 与后端工程，记录学习和实践。",
     url: siteUrl,
   },
 };

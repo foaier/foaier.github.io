@@ -1,7 +1,7 @@
 import Link from "next/link";
-import type { Post } from "@/lib/posts";
+import type { PostSummary } from "@/lib/posts";
 
-export function PostList({ posts }: { posts: Post[] }) {
+export function PostList({ posts }: { posts: PostSummary[] }) {
   if (posts.length === 0) {
     return <p className="empty-posts">文章整理中。</p>;
   }
