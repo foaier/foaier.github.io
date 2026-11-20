@@ -1,10 +1,13 @@
 ---
-title: 多个 Agent 怎么合作？先把分工和交接说清楚
-date: 2026-11-20
-summary: 用工单处理比较顺序、并发、交接和群聊，再区分 Agent-as-tool、MCP 与 A2A。
-series: 工作流实践
-order: 1
-tags: [多 Agent, A2A, 编排]
+title: "多个 Agent 怎么合作？先把分工和交接说清楚"
+date: "2026-11-20"
+summary: "用工单处理比较顺序、并发、交接和群聊，再区分 Agent-as-tool、MCP 与 A2A。"
+series: "Agent Framework 进阶"
+order: 33
+tags: ["多 Agent","A2A","编排"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-composition"]
+goals: ["用工单处理比较顺序、并发、交接和群聊，再区分 Agent-as-tool、MCP 与 A2A。"]
 ---
 
 把一个 Agent 改成五个，答案不会自动变好。你只是多了几次模型调用，也多了几种沟通出错的机会。
@@ -71,6 +74,10 @@ MCP 更多用于接入工具和上下文；A2A 更多用于与一个能管理任
 群聊可以一直互相补充，交接也可能在两个 Agent 之间来回循环。设置最大轮数、交接次数、总时限和最终输出责任人。
 
 当复杂度开始遮住问题本身时，回到最简单的流程：一个 Agent 加几个明确工具。只有评估结果证明拆分有价值，再继续增加角色。
+
+## 先选通信方式，再选编排方式
+
+同一程序内组合能力可以先用[Agent 作为工具](/articles/agent-composition/)。跨系统再看[A2A 客户端](/articles/agent-a2a-client/)及[远程 Agent 作为工具](/articles/agent-a2a-tool/)。需要固定执行顺序则进入[顺序工作流](/articles/workflow-sequential/)，并发、交接和群聊各有独立实验，不能只凭模式名称判断适合与否。
 
 ## 参考资料
 

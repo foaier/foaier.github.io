@@ -1,10 +1,13 @@
 ---
-title: Agent 放进后台服务之后，还缺哪些工程能力？
-date: 2026-11-20
-summary: 把依赖注入、中间件、声明式配置、后台运行和 OpenTelemetry 放到同一张运行流程里。
-series: Agent 开发
-order: 7
-tags: [后台任务, OpenTelemetry, 中间件]
+title: "Agent 放进后台服务之后，还缺哪些工程能力？"
+date: "2026-11-20"
+summary: "把依赖注入、中间件、声明式配置、后台运行和 OpenTelemetry 放到同一张运行流程里。"
+series: "Agent Framework 进阶"
+order: 1
+tags: ["后台任务","OpenTelemetry","中间件"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-dependency-injection"]
+goals: ["把依赖注入、中间件、声明式配置、后台运行和 OpenTelemetry 放到同一张运行流程里。"]
 ---
 
 控制台里 `await agent.RunAsync()` 很顺。放到 Web 应用后，一个任务跑几分钟，用户关了页面，服务器又正好重启，问题就来了。
@@ -74,6 +77,10 @@ request: ticket-summary-42
 默认不要记录完整提示词和工具返回值。它们可能包含个人信息或业务秘密。需要排查具体案例时，用可控采样、脱敏和访问限制。
 
 上线验收可以主动让一个工具超时，确认日志里找得到该任务、错误属于哪一步，用户看到的状态也一致。可观察性是帮助定位真实故障，不只是让监控页面出现一条彩色曲线。
+
+## 先完成一个工程实验
+
+想看耗时从哪里产生，运行[中间件](/articles/agent-middleware/)与[可观察性](/articles/agent-observability/)；想管理配置，运行[声明式 Agent](/articles/agent-declarative/)；想理解长任务，运行[后台响应](/articles/agent-background-responses/)。刚开始不知道该选哪种 Agent，可以先看[类型选型](/articles/agent-types/)。
 
 ## 参考资料
 

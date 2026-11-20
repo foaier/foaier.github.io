@@ -1,10 +1,13 @@
 ---
-title: 让模型调用业务函数，关键不在那个调用按钮
-date: 2026-11-20
-summary: 从 Semantic Kernel 插件入手，讲清 Function Calling、过滤器和 Planning 的边界，让工具调用可控。
-series: 提示词与知识库
-order: 3
-tags: [Semantic Kernel, Function Calling, 插件]
+title: "让模型调用业务函数，关键不在那个调用按钮"
+date: "2026-11-20"
+summary: "从 Semantic Kernel 插件入手，讲清 Function Calling、过滤器和 Planning 的边界，让工具调用可控。"
+series: "Semantic Kernel 专题"
+order: 2
+tags: ["Semantic Kernel","Function Calling","插件"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["semantic-kernel-basics"]
+goals: ["从 Semantic Kernel 插件入手，讲清 Function Calling、过滤器和 Planning 的边界，让工具调用可控。"]
 ---
 
 “查一下工单进度。”如果聊天助手只会生成文字，它最多给你一段解释。要读到实时状态，就必须调用业务系统。
@@ -96,6 +99,10 @@ public sealed class TimingFilter : IFunctionInvocationFilter
 用三个问题就能发现不少问题：正常工单能不能查到，不存在的工单会不会被编造，越权工单是否真的在服务端拒绝。
 
 再加一次超时和重复请求，看应用是否返回可理解的状态。只有工具的真实执行结果可检查，后面的自然语言回复才有依据。
+
+## 学完亲手试一次
+
+给查询课程工具设计成功、参数缺失和业务异常三个输入。说明过滤器应该记录什么、什么时候停止调用。把敏感返回值从日志示例中去掉，再检查异常路径是否仍可定位。
 
 ## 参考资料
 

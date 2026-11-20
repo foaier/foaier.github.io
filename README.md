@@ -2,6 +2,12 @@
 
 基于 Next.js、React 和 TypeScript 构建，并以静态文件发布到 GitHub Pages。
 
+## AI 学习路线
+
+`/learn/` 提供 8 个阶段的学习路线，包含 17 篇推荐入门文章，以及记忆、Skills、MCP、模型接入、工作流等选读专题。课程主线使用 C# / .NET 10。每篇包含学习目标和前置文章，实操专题配有运行方法、结果说明与排错。
+
+课程源码位于 `examples/ai-course/`，使用说明见其中的 README。`npm run examples:pack` 生成只含源码的 `public/downloads/ai-course.zip`，构建时自动执行。下载包不手工维护，不收录编译产物、凭证或实验状态。
+
 ## 本地开发
 
 安装 Node.js 22 或更新版本，然后运行：
@@ -26,11 +32,13 @@
 
     从这里开始写正文。
 
-`series` 与 `order` 为可选字段，例如在 Agent 开发系列追加文章时填写 `series: Agent 开发`，并为 `order` 使用该系列下一个序号。同一系列的序号应连续且不重复；普通随笔不填写这两个字段，归入“工程笔记”。文章页支持目录、阅读时长、代码高亮与复制、表格和系列前后篇导航。文章列表支持按系列筛选，以及搜索标题、简介与标签。
+普通随笔可省略 `series` 和 `order`，归入“工程笔记”。课程文章的系列名称来自 `src/content/curriculum.json`，填写该系列下连续且不重复的 `order`，并提供 `level`、`goals`（目标数组）和 `prerequisites`（前置文章 slug 数组，可为空）。前置知识不能形成循环。学习路线的起始篇和推荐篇也在 curriculum 中维护。
+
+文章页支持目录、阅读时长、代码高亮与复制、表格和系列前后篇导航。文章列表支持按系列筛选，以及搜索标题、简介与标签。教程先说明解决什么问题，再给准备条件、步骤、预期结果、小练习和排错；保留官方参考资料，区分实测结果、可编译示例和需要读者配置的云端能力。
 
 发布前运行 `npm run content:check`、`npm run lint`、`npm run typecheck` 和 `npm run build`。
 
-推送到 main 后，GitHub Actions 会检查并构建站点，再自动部署到 GitHub Pages。
+推送到 main 后，GitHub Actions 会检查文章、构建站点，并编译 .NET 示例、运行不需要密钥的检查；两个任务都成功后才部署到 GitHub Pages。
 Pull Request 会运行相同的检查和构建，但不会部署。
 
 ## GitHub Pages 设置

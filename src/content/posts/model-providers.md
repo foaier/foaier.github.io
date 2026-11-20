@@ -1,10 +1,13 @@
 ---
-title: 换成 DeepSeek 或 Ollama，真的只改一个地址吗？
-date: 2026-11-20
-summary: 从 Chat Completions、Responses 到本地模型，理解“接口兼容”和“能力相同”之间的差别。
-series: Agent 开发
-order: 2
-tags: [DeepSeek, Ollama, 模型接入]
+title: "换成 DeepSeek 或 Ollama，真的只改一个地址吗？"
+date: "2026-11-20"
+summary: "从 Chat Completions、Responses 到本地模型，理解“接口兼容”和“能力相同”之间的差别。"
+series: "Agent Framework 进阶"
+order: 3
+tags: ["DeepSeek","Ollama","模型接入"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["first-model-call"]
+goals: ["从 Chat Completions、Responses 到本地模型，理解“接口兼容”和“能力相同”之间的差别。"]
 ---
 
 很多服务都说兼容 OpenAI API，看起来换模型只需改 `base_url`、密钥和模型名。简单聊天可能确实能跑，但一加工具、视觉或会话状态，就容易出现差异。
@@ -63,6 +66,10 @@ ollama run qwen3:4b
 另外检查工具调用 ID 是否成对、结构化字段是否缺失、中文与专有名词表现如何。模型能通过“你好”的测试，只能证明链路基本打通。
 
 先让业务接口保持小而明确，再更换底层模型。这样换供应商是一项可评估的工程工作，而不是一次祈祷。
+
+## 选择一个服务跑通再继续
+
+本机模型看[Ollama](/articles/agent-ollama/)，兼容接口看[DeepSeek](/articles/agent-deepseek/)，云端项目看[Foundry](/articles/foundry-models/)。想知道为什么一个服务聊天可用、后台模式却报错，先读[两类 API 的区别](/articles/agent-responses-api/)。不要同时更换模型、提示词和业务代码，先只替换配置做对照。
 
 ## 参考资料
 

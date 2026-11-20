@@ -1,84 +1,71 @@
 ---
-title: Agent 怎么记住你？会话、历史和长期记忆要分开
-date: 2026-11-20
-summary: 从 AgentSession 到文件、Valkey、Mem0 和 Foundry，讲清记忆存在哪里、什么时候读取，以及怎样避免串会话。
-series: Agent 开发
-order: 3
-tags: [Session, 记忆, 持久化]
+title: "多轮会话：为什么下一句能接住上一句"
+date: "2026-11-20"
+summary: "用 AgentSession 连续提问，并观察新会话的区别"
+series: "Agent Framework 入门"
+order: 2
+tags: ["Agent Framework 入门","循序渐进"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["first-agent"]
+goals: ["用 AgentSession 连续提问，并观察新会话的区别","理解当前对话、保存历史和长期记忆是三个不同问题"]
 ---
 
-第一轮说“我想查退款”，第二轮问“那要多久”，模型能接上话，很容易让人觉得它已经有了记忆。
+你对助手说“我的练习编号是DEMO-001”，下一句再问编号，它为什么能回答？这一课不凭感觉判断“有记忆了”，而是创建两个会话，观察相同的问题在不同上下文里得到什么结果。
 
-但程序重启以后还能接上吗？换一个设备呢？两个用户同时聊天会不会串？这些问题，单靠把历史消息塞进上下文解决不了。
+## 先给每段对话一个容器
 
-## 先把四种东西分开
+Session承载一次对话相关的状态。当前版本使用AgentSession，由agent.CreateSessionAsync创建。一次请求一个新Session，会把连续对话切断；把所有用户塞进同一个Session，又可能把甲的信息带到乙的回答里。
 
-**Session 是一次会话的状态容器；聊天历史是消息记录；长期记忆是筛选后值得再次使用的信息；业务数据仍然属于业务系统。**
+旧教程中可能出现AgentThread。看到不同类型名时先核对版本，不要把两套API拼在一个项目中。本课程核心示例固定在1.28.0，并统一使用Session。模型参数并不会因为创建一个Session就被重新训练。
 
-例如“用户喜欢简洁回答”可以作为偏好记忆，“订单已退款”则应以订单系统的最新状态为准。不能把上次对话里提过的状态长期当作实时事实。
+## 准备并运行
 
-## 同一个 Session，才能接着聊
+先完成[环境准备](/articles/dotnet-ai-setup/)，下载并解压[课程示例](/downloads/ai-course.zip)。在解压后的 ai-course 目录打开终端。本篇使用 .NET 10，核心包 Microsoft.Agents.AI 1.28.0；依赖版本已写在项目文件中。
 
-当前 Agent Framework 文档使用 `AgentSession`。旧文章里出现的 `AgentThread` 等名称不能直接与新 API 拼接。
+```powershell
+dotnet run --project Core -- session
+```
 
-接着前一篇已创建好的 `agent`，可以这样复用会话：
+需要在线模型的练习，请先在当前终端设置 AI_ENDPOINT、AI_MODEL、AI_API_KEY。不要把网页聊天产品的登录密码当作 API Key。模型调用会消耗所选服务的额度；本地模型则需要相应硬件和运行服务。
+
+## 两个会话，做同一个问题
+
+打开 Core/Lessons/FirstSteps.cs。先创建alice和bob两个Session，只把练习编号告诉alice，然后分别提问：
 
 ```csharp
-AgentSession session = await agent.CreateSessionAsync();
-Console.WriteLine(await agent.RunAsync("我的演示工单编号是 DEMO-001。", session));
-Console.WriteLine(await agent.RunAsync("刚才提到的编号是什么？", session));
+public static async Task Session()
+{
+    var agent = CourseClient.Agent("只根据当前会话回答，不知道用户信息时说不知道。");
+    AgentSession alice = await agent.CreateSessionAsync();
+    AgentSession bob = await agent.CreateSessionAsync();
+    Console.WriteLine(await agent.RunAsync("我正在学 C#，这次练习的编号是 DEMO-001。", alice));
+    Console.WriteLine("同一会话：" + await agent.RunAsync("练习编号是什么？", alice));
+    Console.WriteLine("新会话：" + await agent.RunAsync("练习编号是什么？", bob));
+}
 ```
 
-这里只验证上下文衔接，不表示状态已经落盘。具体消息存在本地还是服务端，取决于 Agent 实现、所选 API 和历史提供器。
 
-应用对外可以使用自己的会话 ID，但必须在服务端校验归属，再映射到内部或服务端会话标识。共享同一个模型凭证的多个用户，不能因为知道某个 `response_id` 就访问别人的会话。
+这里的alice和bob只是实验变量名。正式系统中，会话标识应与已认证的用户对应，并检查访问权限，不能只相信浏览器传来的一个字符串。用户拥有相同名称，也不意味着他们应该共享会话。
 
-## 存储方案按职责选
+## 预期看到什么
 
-| 方案 | 更适合放什么 | 要留意什么 |
-| --- | --- | --- |
-| 内存历史 | 本地演示、短会话 | 重启丢失，不能跨实例共享 |
-| 自定义数据库历史 | 消息与恢复所需状态 | 版本、并发写、租户隔离 |
-| Valkey / Redis 类存储 | 外部会话历史或缓存 | TTL、备份与实际持久化设置 |
-| FileMemoryProvider | 可由模型读写的记忆文件 | 文件范围、路径隔离、删除与同步 |
-| ChatHistoryMemoryProvider | 按需检索历史相关内容 | 检索结果不等于完整逐条历史 |
-| Mem0 等记忆服务 | 抽取与检索长期信息 | 数据边界、更新纠错和额外成本 |
-| Foundry 相关记忆服务 | 服务支持的托管记忆能力 | 区域、版本、生命周期与归属 |
+同一会话应当能回答DEMO-001；新会话没有收到这个事实，应该说明不知道。如果新会话猜出一个编号，也不能认为它访问了另一个Session。生成模型可能猜测，应该检查实际发送的历史和输入内容。
 
-具体包名和支持方式会变化，尤其不能把某个提供器当成另一种的直接替代。当前官方文档也明确提示：文件记忆与旧实验性记忆 API 的迁移并非自动兼容。
+可以把编号换成随机且无敏感意义的字符串，例如DEMO-728，重复实验。这样比问“我喜欢什么颜色”更容易判断是否真正利用了上下文。不要用真实身份证号、订单号或密钥做实验。
 
-## 历史太长时，怎么缩短
+## 三种“记住”要分开
 
-把所有消息一直带着，成本和延迟都会增加。可以保留最近一段、总结较早内容，或按问题检索相关历史。
+当前对话能接话，解决的是连续上下文。程序重启之后还能继续，解决的是状态保存与恢复。隔了很多段对话还能按用户偏好回答，通常要设计独立的长期记忆。这三种能力可以组合，但不能因为第一种成功就假设另外两种也成立。
 
-但是压缩不是无损操作。总结可能漏条件，也可能把用户的假设写成事实。重要状态如审批结果、任务 ID、权限范围，应以结构化数据保存。
+本篇使用的普通聊天客户端主要在应用一侧组织历史。某些服务托管的Agent则会在远端保存状态，会话里可能持有远端标识。序列化Session不一定等于导出所有服务端数据，恢复时仍要具备相应资源与权限。
 
-还要保留工具调用与结果之间的有效关系。裁掉调用却留下结果，或反过来，都可能破坏消息序列。使用 reducer 或 compaction 时，要按当前 SDK 的消息规则验证，不能简单按字符串长度截断。
+## 失败时怎样定位
 
-## 持久化时，再处理并发
+如果同一Session也忘记了编号，检查第二次调用是否真的传了alice，是否中间重新创建了对象，是否设置了历史裁剪。再用更短的对话排除上下文过长。如果不同用户能读到彼此信息，先检查应用的会话映射和授权，不能靠提示词补救。
 
-用户快速发出两条消息，两个请求都读取同一个旧版本，然后分别写回，会发生什么？其中一个更新可能覆盖另一个。
-
-可以用同一会话串行处理、乐观并发版本号等方式控制。下面是业务层的流程示意：
-
-```text
-校验会话归属
-读取 session 与 version
-在受控的会话执行范围内运行 Agent
-用预期 version 保存新状态
-冲突时重新判断，避免盲目覆盖
-```
-
-如果调用过程中产生外部副作用，不能简单重跑整个过程；工具还要有独立的幂等设计。
-
-## 用户也应该能纠正和删除记忆
-
-“记得越多越好”不是一个好的默认目标。过时偏好和错误总结，会持续影响后续回答。
-
-让用户能看到保存了哪些偏好、能纠正、能清除。删除时考虑消息、摘要、记忆文件、向量索引与服务端状态，而不只是把聊天页面清空。
+小练习：给bob告诉另一个编号，交替向两个Session提问。两个结果应该互不混淆。下一篇 [会话保存与恢复](/articles/agent-session-persistence/) 会把状态写入文件，让你关闭程序再继续。
 
 ## 参考资料
 
-- [Agent Framework：Session](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/session)
-- [上下文提供器、文件记忆与迁移说明](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/context-providers)
-- [Agent Framework 集成目录](https://learn.microsoft.com/en-us/agent-framework/integrations/)
+- [AgentSession 生命周期](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/session)
+- [聊天历史](https://learn.microsoft.com/en-us/agent-framework/agents/conversations/chat-history)

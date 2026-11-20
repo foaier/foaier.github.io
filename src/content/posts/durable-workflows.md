@@ -1,79 +1,81 @@
 ---
-title: 工作流断了怎么接着跑？Checkpoint 不是后悔药
-date: 2026-11-20
-summary: 把检查点、回滚、幂等和人工审批放在一起理解，设计能跨进程恢复的长任务。
-series: 工作流实践
-order: 4
-tags: [Checkpoint, 故障恢复, Human-in-the-loop]
+title: "Checkpoint 入门：保存检查点，从中间继续执行"
+date: "2026-11-20"
+summary: "运行 checkpoint 练习并观察节点事件"
+series: "工作流实践"
+order: 17
+tags: ["工作流实践","循序渐进"]
+level: "工作流实战 · 可离线运行"
+prerequisites: ["workflows-nodes-streaming"]
+goals: ["运行 checkpoint 练习并观察节点事件","保存检查点，从中间继续执行"]
 ---
 
-一个流程跑了十分钟，刚等到人工确认，服务重启了。重新从头跑很浪费；如果前面已经发过通知或提交过订单，还可能重复执行。
+流程执行到一半失败，如果每次都从头重跑，既浪费时间，也可能重复调用外部系统。检查点记录某个执行边界的状态，允许从那里继续。本篇先在一个无副作用的小流程里观察恢复过程。
 
-Checkpoint 是解决这类问题的重要能力，但它保存的是工作流状态，不是替整个外部世界拍一张可以随时还原的快照。
+## 先理解这一步的职责
 
-## 检查点里保存的是什么
+运行时传入CheckpointManager，在SuperStepCompletedEvent中读取CheckpointInfo。恢复时重新构造相同结构的Workflow，再调用ResumeStreamingAsync。这里使用Default管理器，演示同一进程中保存并恢复，不把内存检查点当作跨进程持久化。
 
-Agent Framework 的图式工作流在 superstep 边界保存检查点，涉及执行器状态、下一轮待处理消息、待回复请求及共享状态等。不同语言和版本可能还有额外的入口检查点行为。
+## 准备并运行
 
-读取检查点以后，运行器可以从相应位置继续推进。但如果某个节点之前已经向外部支付系统提交了请求，那笔业务动作不会随着恢复自动消失。
+完成[环境准备](/articles/dotnet-ai-setup/)，下载[课程示例](/downloads/ai-course.zip)，在解压后的ai-course目录运行下面的命令。本项目使用.NET 10与Microsoft.Agents.AI.Workflows 1.28.0，依赖已经写入Workflows.csproj。本篇的实验不需要在线模型密钥。
 
-**恢复运行状态，与撤销业务副作用，是两套机制。**
+~~~powershell
+dotnet run --project Workflows -- checkpoint
+~~~
 
-## 内存检查点不等于持久化恢复
+实现位于Workflows/WorkflowLessons.cs。Program.cs选择对应命令，TextStep等公共执行器放在同一文件中。下载包包含整个项目，下面重点展示本篇需要阅读的方法；不需要从其他文章猜缺失的类。
 
-官方样例经常使用内存存储，方便演示暂停和恢复。进程退出后，内存里的检查点就没有了。
+## 对照实现，跟踪输入与输出
 
-实际需要跨重启恢复时，选择持久化存储，并考虑访问权限、版本兼容和保留时间。多实例部署还要保证某个任务不会被两个工作进程同时恢复。
-
-| 需要保存的对象 | 为什么需要 |
-| --- | --- |
-| 业务任务 ID | 用户和系统定位同一项工作 |
-| 工作流与配置版本 | 恢复时解释旧状态 |
-| 检查点标识与数据 | 继续推进节点和消息 |
-| 外部动作与幂等键 | 判断已经执行了什么 |
-| 待审批请求 | 恢复后知道还在等谁 |
-
-数据库连接、流、线程之类运行时对象不应直接当作可序列化状态保存。存必要的标识，恢复时重建连接。
-
-## 人工参与需要一个真正的暂停点
-
-Human-in-the-loop 可以是审批，也可以是补充缺失信息。运行到这里时，生成请求并保存状态，再把待处理事项展示给有权处理的人。
-
-```text
-生成待审批动作
-  → 保存请求、参数版本和恢复信息
-  → 等待人工处理
-  → 校验审批人、有效期与当前业务状态
-  → 恢复工作流
-  → 执行幂等业务动作
+```csharp
+public static async Task Checkpoints(bool rollback)
+    {
+        var manager = CheckpointManager.Default;
+        var saved = new List<CheckpointInfo>();
+        await using var first = await InProcessExecution.RunStreamingAsync(Basic(), " rag ", manager);
+        await foreach (var evt in first.WatchStreamAsync())
+        {
+            if (evt is SuperStepCompletedEvent step && step.CompletionInfo?.Checkpoint is { } checkpoint) saved.Add(checkpoint);
+            Print(evt);
+        }
+        if (saved.Count == 0) throw new InvalidOperationException("没有产生检查点。");
+        Console.WriteLine($"保存 {saved.Count} 个检查点，恢复第一个。");
+        if (rollback)
+        {
+            await first.RestoreCheckpointAsync(saved[0], CancellationToken.None);
+            await foreach (var evt in first.WatchStreamAsync()) Print(evt);
+        }
+        else
+        {
+            await using var resumed = await InProcessExecution.ResumeStreamingAsync(Basic(), saved[0], manager);
+            await foreach (var evt in resumed.WatchStreamAsync()) Print(evt);
+        }
+    }
 ```
 
-这是一份业务流程示意。不要用一个 Web 请求一直挂着等待人工点击，也不要只在聊天记录里留一句“请确认”，却没有保存可恢复的请求。
 
-拒绝、超时和取消都应有分支。审批以后业务状态已经变化，也可能需要重新确认，不能机械地恢复并执行旧动作。
+先找到创建节点的位置，再看边的连接与WithOutputFrom。最后沿着输入走一遍，写下每个节点接收的类型和输出的类型。观察事件的方法会打印执行器完成与最终输出，出现WorkflowErrorEvent时会明确抛出错误。
 
-## 回滚检查点，不代表撤销退款
+## 预期结果怎样核对
 
-回到较早检查点，可能让后续节点重新运行。所以发消息、生成工单、扣款等动作，必须设计幂等键。
+命令先完成一次RAG解释，保存检查点，再从第一个检查点恢复。预期后续answer节点再次输出相同结果。日志能够说明哪些节点重跑，而不是只在最后打印“恢复成功”。
 
-幂等键应对应一个明确的业务意图，不能每次重试重新生成。执行服务看到相同键时，应返回已有结果或处理中状态，而不是重复动作。
+不要只看到进程退出码为零就认为流程正确。有时类型不匹配会导致目标没有收到预期消息，所以还要检查节点日志和最终结果是否出现。修改了项目后重新运行时会重新编译，排错时保留完整命令和输出。
 
-确实要撤销外部动作时，需要业务支持的补偿流程，比如取消预订、创建冲正记录或发更正通知。补偿本身也可能失败，要单独记录，而不是笼统地写“已回滚”。
+## 换一个输入，再做一次
 
-## 升级以后，还能读取旧状态吗
+在中间节点加入一条明显日志，比较从不同检查点恢复时它是否出现。保留执行器ID不变，再尝试改变业务输出，观察恢复状态与新代码之间的关系。
 
-节点名称、输入类型和状态结构变化，都可能影响恢复。发布新版本之前，拿一份旧检查点做恢复演练。
+练习时每次只改一个条件或一个节点。把原始输出与修改后的输出放在一起比较，能更容易判断变化由哪里产生。完成实验后，用自己的话解释这一种结构适合什么任务，再决定是否放进实际应用。
 
-可以为运行中的任务保留旧版本处理器，或提供明确迁移策略。不要假定新版本能理解所有旧状态，更不要在失败后直接删除检查点让任务“重新开始”。
+## 放进真实项目之前
 
-## 用故障演练验证可靠性
+跨进程恢复还需要持久化检查点存储、稳定的类型序列化和版本兼容方案。检查点不会自动回滚数据库、退款或外部邮件。凡是会产生副作用的步骤，都应有幂等键、执行记录或补偿策略，不能因为恢复点存在就放心重复执行。
 
-分别在工具调用前、外部调用成功后、检查点保存前后中断运行，再重启恢复。观察任务是否重复执行，前端状态是否一致。
-
-还要测试审批重复提交和两个工作进程同时恢复。只有这些情况都能解释清楚，“支持断点续跑”才不只是一个演示按钮。
+这一步最有价值的成果不是一张更复杂的流程图，而是你能说清楚：输入在哪里进入、节点为什么被触发、结果从哪里出来、失败后怎样被发现。后续教程会在这条清楚的路径上逐步加入模型能力。
 
 ## 参考资料
 
-- [Agent Framework：检查点与恢复语义](https://learn.microsoft.com/en-us/agent-framework/workflows/checkpoints)
-- [Human-in-the-loop 工作流](https://learn.microsoft.com/en-us/agent-framework/workflows/human-in-the-loop)
-- [工具审批与继续运行](https://learn.microsoft.com/en-us/agent-framework/agents/tools/tool-approval)
+- [Agent Framework 工作流](https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/)
+- [检查点与恢复](https://learn.microsoft.com/en-us/agent-framework/workflows/checkpoints)

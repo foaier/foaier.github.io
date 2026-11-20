@@ -4,3 +4,8 @@ out/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+examples/**/bin/
+examples/**/obj/
+examples/**/.state/
+examples/**/.env
+public/downloads/ai-course.zip

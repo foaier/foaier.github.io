@@ -1,10 +1,13 @@
 ---
-title: 让 Agent 看图、搜资料、跑代码，能力边界要先讲清
-date: 2026-11-20
-summary: 理解视觉输入、File Search、Web Search、Code Interpreter 和 Copilot SDK，各自负责什么，又不能保证什么。
-series: Agent 开发
-order: 8
-tags: [多模态, 托管工具, Copilot SDK]
+title: "让 Agent 看图、搜资料、跑代码，能力边界要先讲清"
+date: "2026-11-20"
+summary: "理解视觉输入、File Search、Web Search、Code Interpreter 和 Copilot SDK，各自负责什么，又不能保证什么。"
+series: "Agent Framework 进阶"
+order: 36
+tags: ["多模态","托管工具","Copilot SDK"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-function-tools"]
+goals: ["理解视觉输入、File Search、Web Search、Code Interpreter 和 Copilot SDK，各自负责什么，又不能保证什么。"]
 ---
 
 Agent 接了更多工具以后，很容易出现一种错觉：能看到网页、文件和终端，就能可靠完成任何任务。
@@ -72,6 +75,10 @@ GitHub Copilot SDK 提供把 Copilot 能力接入应用的途径，具体功能�
 比如“分析上传的演示工单表，生成按类别统计的 CSV”。验收时检查输入文件、分析代码、实际输出文件和统计结果；不要只看 Agent 最后的解释。
 
 工具数量不是目标。每个工具都能被可靠调用、结果能检查、错误有出口，组合起来才会稳。
+
+## 按工具选择实操章节
+
+发送一张图片从[视觉输入](/articles/agent-vision/)开始；计算看[代码解释器](/articles/agent-code-interpreter/)；私有文档看[File Search](/articles/agent-file-search/)；最新网页看[Web Search](/articles/agent-web-search/)；已有HTTP接口看[OpenAPI 工具](/articles/agent-openapi-tool/)。这些工具的准备条件不同，不需要一次全部启用。
 
 ## 参考资料
 

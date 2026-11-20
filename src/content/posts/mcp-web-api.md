@@ -1,92 +1,95 @@
 ---
-title: MCP 怎么接进现有 Web API？先从一个只读工具开始
-date: 2026-11-20
-summary: 分清 MCP Host、Client、Server，以及 stdio 和 HTTP；再用 ASP.NET Core 暴露一个小工具。
-series: Agent 开发
-order: 5
-tags: [MCP, ASP.NET Core, OpenAPI]
+title: "做一个 MCP 服务：同一份课程数据，给网页和 Agent 使用"
+date: "2026-11-20"
+summary: "建立同时提供 REST 与 MCP 的本机只读服务。"
+series: "Agent Framework 进阶"
+order: 28
+tags: ["Agent Framework 进阶","循序渐进"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-function-tools"]
+goals: ["建立同时提供 REST 与 MCP 的本机只读服务。"]
 ---
 
-你已经有一个查工单的 Web API，想让多个 AI 应用都能调用。可以分别写适配，也可以在业务能力外面加一层 MCP 接口。
+你已经写过一个查询课程时长的函数。网页可能希望通过 HTTP 接口调用它，Agent 则希望知道有哪些工具、需要什么参数。MCP 为工具发现和调用提供协议，REST 则继续服务普通业务客户端。它们可以共享业务逻辑，不需要把整个 Web API 推翻重写。
 
-MCP 的价值是统一能力发现和调用约定。它不会自动把普通接口变得安全，也不会替你决定哪些用户有权查哪些工单。
+## 准备与运行
 
-## 三个角色，别都叫 Server
+先完成[环境准备](/articles/dotnet-ai-setup/)，下载[完整示例](/downloads/ai-course.zip)，在解压后的 ai-course 目录运行。示例使用 .NET 10；依赖版本固定在项目文件中。此练习不需要模型和 API Key。在 ai-course 目录运行 dotnet run --project McpServer，终端保持开启。服务只监听本机 localhost:5071。
 
-Host 是用户正在使用的 AI 应用；Client 是 Host 内与某个 MCP Server 通信的部分；Server 对外提供工具、资源或提示模板等能力。
 
-Server 不一定需要自己调用模型。一个提供只读工单查询的 MCP 服务，可以完全由普通业务代码组成。
 
-反过来，也可以把一个 Agent 封装成工具：外部调用者传入任务，内部 Agent 完成处理，再返回结果。此时要明确它的成本、超时、会话归属与可执行动作，不能把整个 Agent 无边界地开放出去。
+## 代码是怎样工作的
 
-## stdio 和 HTTP 的使用场景不同
-
-stdio 常用于本机集成：宿主启动一个子进程，通过标准输入输出交换协议消息。**普通日志不要混进 stdout**，否则可能破坏协议；按 SDK 方式把日志送到 stderr 等独立通道。
-
-HTTP 更适合远程服务。当前常见的是 Streamable HTTP；老教程中的独立 SSE 传输方式，需要按客户端和服务端版本核对。它们不能只换一个 URL 就当作等价。
-
-协议和 SDK 都在演进，尤其初始化、会话和扩展能力的行为可能随版本变化。优先让 SDK 处理协议细节，而不是手工拼几条 JSON-RPC 消息假装完成集成。
-
-## 一个 ASP.NET Core 最小示例
-
-使用 .NET 10，在独立实验项目中安装官方 MCP SDK 的 ASP.NET Core 包：
-
-```bash
-dotnet new web -n TicketMcp --framework net10.0
-cd TicketMcp
-dotnet add package ModelContextProtocol.AspNetCore --version 2.4.0
-```
-
-将 `Program.cs` 改成下面内容。示例按 `ModelContextProtocol.AspNetCore 2.4.0`、`net10.0` 完成编译检查。这是本地只读演示，没有接实际业务，也没有配置远程鉴权。
+HTTP 分支注册 AddMcpServer、WithHttpTransport 和 CourseTools，然后 MapMcp("/mcp") 提供协议端点。普通 /courses/{name} 路由调用同一个方法。工具上的描述告诉客户端用途，参数描述说明课程名称。源码中的 --stdio 和 --agent 是后续专题选项，本篇不用打开。
 
 ```csharp
 using System.ComponentModel;
 using ModelContextProtocol.Server;
+using AiCourse;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 
-var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddMcpServer()
-    .WithHttpTransport()
-    .WithTools<TicketTools>();
-
-var app = builder.Build();
-app.MapMcp("/mcp");
-app.Run();
+if (args.Contains("--stdio"))
+{
+    var builder = Host.CreateApplicationBuilder();
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+    var mcp = builder.Services.AddMcpServer().WithStdioServerTransport().WithTools<CourseTools>();
+    if (args.Contains("--agent")) mcp.WithTools<AgentTools>();
+    await builder.Build().RunAsync();
+}
+else
+{
+    var builder = WebApplication.CreateBuilder(args.Where(arg => arg != "--agent").ToArray());
+    builder.WebHost.UseUrls("http://localhost:5071");
+    var mcp = builder.Services.AddMcpServer().WithHttpTransport().WithTools<CourseTools>();
+    if (args.Contains("--agent")) mcp.WithTools<AgentTools>();
+    var app = builder.Build();
+    app.MapGet("/courses/{name}", (string name) => CourseTools.FindCourse(name));
+    app.MapMcp("/mcp");
+    await app.RunAsync();
+}
 
 [McpServerToolType]
-public sealed class TicketTools
+public sealed class CourseTools
 {
-    [McpServerTool, Description("查询演示工单状态，只读操作。")]
-    public static string GetStatus(
-        [Description("演示工单编号，例如 DEMO-001")] string ticketId)
-        => ticketId == "DEMO-001" ? "演示状态：处理中" : "未找到演示工单";
+    [McpServerTool, Description("查询演示课程学习时长，只读。支持AI入门和C#起步。")]
+    public static string FindCourse([Description("课程名")] string name) => name switch
+    { "AI入门" => "30分钟", "C#起步" => "45分钟", _ => "未找到课程" };
 }
+
+[McpServerToolType]
+public sealed class AgentTools
+{
+    [McpServerTool, Description("请教学助手用中文解释一个AI概念。会调用模型。")]
+    public static async Task<string> Explain([Description("要学习的AI概念，最多200字")] string topic, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(topic) || topic.Length > 200) throw new ArgumentException("主题应为1到200字。");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        using var client = CourseClient.Create();
+        var agent = client.AsAIAgent(instructions: "只解释AI学习相关主题，用三句话说明，不执行外部操作。");
+        return (await agent.RunAsync(topic, cancellationToken: timeout.Token)).ToString();
+    }
+}
+
 ```
 
-运行 `dotnet run --urls http://127.0.0.1:5058`。用支持 HTTP MCP 的客户端或 Inspector 连接 `/mcp`，先查看工具列表，再调用 `GetStatus`。浏览器直接访问返回的页面，不是判断协议是否工作完整的办法。
 
-## 接现有业务时，共享服务层
 
-已有 Web API 和 MCP 工具最好调用同一套应用服务，这样校验、鉴权和状态处理只维护一份。没必要让 MCP 工具再用 HTTP 绕回来调用同一进程里的 Controller。
+## 怎样判断成功
 
-开放给远程调用者之前，补上身份认证、工具授权、限流、参数验证和日志。工具发现成功，不代表调用者自动拥有所有工具的权限。
+另开终端访问 `http://localhost:5071/courses/AI入门`，应得到30分钟。REST 成功只说明业务服务在线，不能证明 MCP 握手完成；下一篇会用 MCP 客户端列出工具并直接调用验证。浏览器打开 /mcp 看到错误，也不一定表示服务坏了，因为协议请求有规定的消息与请求头。
 
-如果使用 OpenAPI 自动生成或接入工具，也要筛选接口。API 说明里有删除、批处理或管理能力，不等于它们都适合直接暴露给模型。
+## 自己改一次
 
-## GitHub MCP 和 Agent 封装也是同一原则
+给 CourseTools 增加一门课程，重新启动服务，同时从 REST 与 MCP 客户端查询。检查两条路径是否返回相同结果。这能帮助你理解协议层只是适配器，业务规则应该共享，而不是各复制一份。
 
-接入 GitHub MCP 时，根据任务只提供需要的仓库与操作范围，并使用合适的凭证。读取 issue 与创建提交的影响不同，不能因为是同一个 Server 就一律放开。
+## 遇到问题先看这里
 
-把 Agent 暴露为 MCP 工具时，当前不同语言 SDK 的官方封装支持并不完全一致。.NET 可以按 MCP SDK 工具处理器调用业务或 Agent 服务，不要假定所有语言都存在同名的一行封装方法。
-
-## 验证四个结果
-
-检查工具能被发现、正常参数能返回、不合法参数能明确拒绝、越权请求在业务层被拦截。再观察超时、取消和进程退出后资源是否释放。
-
-MCP 让连接方式统一，工具的质量仍然取决于你暴露的是怎样一项业务能力。
+端口占用时先停止自己的旧实验进程。服务只在本机演示，没有实现公网认证、授权和限流；部署前应按真实身份与资源范围设计这些能力。不要直接把数据库管理方法全部标成工具。
 
 ## 参考资料
 
-- [MCP 架构说明](https://modelcontextprotocol.io/docs/learn/architecture)
-- [官方 C# SDK 与包划分](https://github.com/modelcontextprotocol/csharp-sdk)
-- [Agent Framework：MCP 客户端工具](https://learn.microsoft.com/en-us/agent-framework/agents/tools/local-mcp-tools)
-- [把 Agent 暴露为 MCP 工具的语言支持说明](https://learn.microsoft.com/en-us/agent-framework/hosting/self-hosting/mcp)
+- [MCP 官方文档](https://modelcontextprotocol.io/docs/getting-started/intro)
+- [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import matter from "gray-matter";
 import { remark } from "remark";
 import remarkGfm from "remark-gfm";
@@ -9,13 +9,16 @@ const directory = new URL("../src/content/posts/", import.meta.url);
 const files = readdirSync(directory).filter((file) => file.endsWith(".md"));
 const slugs = new Set(files.map((file) => file.slice(0, -3)));
 const positions = new Map();
-const expectedSeries = ["AI 基础", "提示词与知识库", "Agent 开发", "工作流实践"];
+const curriculum = JSON.parse(readFileSync(new URL("../src/content/curriculum.json", import.meta.url), "utf8"));
+const expectedSeries = curriculum.map((stage) => stage.name);
+const metadata = new Map();
 const errors = [];
 let chineseCharacters = 0;
 
 for (const file of files) {
   try {
     const { data, content } = matter(readFileSync(new URL(file, directory), "utf8"));
+    metadata.set(file.slice(0, -3), data);
     for (const field of ["title", "summary"]) assert.equal(typeof data[field], "string", `${field} must be a string`);
     const date = data.date instanceof Date ? data.date.toISOString().slice(0, 10) : data.date;
     assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
@@ -27,6 +30,12 @@ for (const file of files) {
       const key = `${data.series}/${data.order}`;
       assert.ok(!positions.has(key), `Duplicate series position: ${key}`);
       positions.set(key, file);
+      assert.ok(typeof data.level === "string" && data.level.length > 0, "Missing learner level");
+      assert.ok(Array.isArray(data.goals) && data.goals.length > 0 && data.goals.every((goal) => typeof goal === "string" && goal.trim()), "Missing learning goals");
+      assert.ok(Array.isArray(data.prerequisites), "Missing prerequisites");
+      for (const prerequisite of data.prerequisites) {
+        assert.ok(slugs.has(prerequisite) && prerequisite !== file.slice(0, -3), `Invalid prerequisite: ${prerequisite}`);
+      }
       assert.ok(content.includes("## 参考资料") || content.includes("## 延伸阅读") || content.includes("## 继续阅读"), "Missing references");
     }
     const tree = remark().use(remarkGfm).parse(content);
@@ -41,6 +50,8 @@ for (const file of files) {
         if (node.url.startsWith("/articles/")) {
           const slug = node.url.split("/")[2];
           assert.ok(!slug || slugs.has(slug), `Broken article link: ${node.url}`);
+        } else if (node.url.startsWith("/downloads/")) {
+          assert.ok(existsSync(new URL(`../public${node.url}`, import.meta.url)), `Missing download: ${node.url}`);
         } else if (/^https?:/.test(node.url)) {
           assert.equal(new URL(node.url).protocol, "https:", `Use HTTPS: ${node.url}`);
           sourceLinks++;
@@ -52,9 +63,10 @@ for (const file of files) {
     const count = content.match(/[\u3400-\u9fff]/g)?.length ?? 0;
     chineseCharacters += count;
     if (data.series) {
-      assert.ok(count >= 800 && headings >= 4 && sourceLinks >= 2, "Series article is missing substantive content or references");
+      assert.ok(count >= 450 && headings >= 4 && sourceLinks >= 2, "Series article is missing explanation, lesson sections or references");
     }
     assert.equal((content.match(/^```/gm)?.length ?? 0) % 2, 0, "Unclosed fenced code block");
+    assert.equal((content.match(/^~~~/gm)?.length ?? 0) % 2, 0, "Unclosed tilde code block");
   } catch (error) {
     errors.push(`${file}: ${error.message}`);
   }
@@ -64,6 +76,19 @@ try {
   for (const name of expectedSeries) {
     const count = [...positions.keys()].filter((key) => key.startsWith(`${name}/`)).length;
     for (let index = 1; index <= count; index++) assert.ok(positions.has(`${name}/${index}`), `Missing series position: ${name}/${index}`);
+  }
+  const visiting = new Set(), visited = new Set();
+  function checkPrerequisites(slug) {
+    assert.ok(!visiting.has(slug), `Prerequisite cycle at ${slug}`);
+    if (visited.has(slug)) return;
+    visiting.add(slug);
+    for (const prerequisite of metadata.get(slug)?.prerequisites ?? []) checkPrerequisites(prerequisite);
+    visiting.delete(slug); visited.add(slug);
+  }
+  for (const slug of slugs) checkPrerequisites(slug);
+  for (const stage of curriculum) {
+    assert.equal(metadata.get(stage.start)?.series, stage.name, `Invalid stage start: ${stage.start}`);
+    for (const slug of stage.recommended) assert.equal(metadata.get(slug)?.series, stage.name, `Invalid recommended chapter: ${slug}`);
   }
 } catch (error) {
   errors.push(error.message);

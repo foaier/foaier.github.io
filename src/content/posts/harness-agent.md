@@ -1,73 +1,59 @@
 ---
-title: Agent Harness 是什么？给长任务配一套工作台
-date: 2026-11-20
-summary: 把计划、待办、上下文压缩、工具审批和进度恢复组织起来，理解 Harness 的价值与限制。
-series: 工作流实践
-order: 6
-tags: [Harness, TodoProvider, 长任务]
+title: "Harness Agent：把常用运行能力装配起来"
+date: "2026-11-20"
+summary: "创建 HarnessAgent，查看并选择默认能力，而不是盲目全部开启。"
+series: "Agent Framework 进阶"
+order: 43
+tags: ["Agent Framework 进阶","循序渐进"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-planning","agent-tool-approval"]
+goals: ["创建 HarnessAgent，查看并选择默认能力，而不是盲目全部开启。"]
 ---
 
-让模型回答一句话，运行逻辑很简单。让它整理一批资料、修改多个文件、验证结果，再处理失败项，就需要更多配套能力。
+学习了会话、待办、模式、记忆之后，你可能发现每个项目都在做相似装配。Harness 把一些常用运行能力组织在一起。它不是一个更聪明的模型，也不会自动替你完成权限、预算和验收设计。先理解里面装了什么，再决定是否使用。
 
-Agent Harness 可以理解为围绕模型搭起来的工作台：管理任务、工具、上下文和执行边界，让一个长任务有机会持续推进。
+## 准备与运行
 
-## Harness 不是一个更大的模型
+先完成[环境准备](/articles/dotnet-ai-setup/)，下载[完整示例](/downloads/ai-course.zip)，在解压后的 ai-course 目录运行。示例使用 .NET 10；依赖版本固定在项目文件中。请在当前终端配置 AI_ENDPOINT、AI_MODEL、AI_API_KEY，并选择支持工具调用的模型。这里提供的是可编译示例；真实回答取决于模型服务，文字不会每次相同。
 
-模型提供理解与生成能力；Harness 负责在运行过程中组织这些能力。常见部分包括工具循环、会话、记忆、待办、模式切换、审批、可观察性和预算限制。
+~~~powershell
+dotnet run --project Integrations -- harness
+~~~
 
-Microsoft Agent Framework 的 Harness 是这些已有组件的一种组合。它仍然使用标准 Agent 与 Session 抽象，并不是把模型换成了一个无所不能的新系统。
+## 代码是怎样工作的
 
-默认启用哪些功能，各语言和版本并不完全相同。采用前先看当前能力表，尤其文件访问、脚本执行和后台委派，不要仅凭“自带工具”就全部打开。
+AsHarnessAgent 接收 HarnessAgentOptions。示例保留待办与模式，关闭网页搜索、文件记忆、技能加载和自动批准，专注规划及文字讲解。关闭这些能力是本练习的范围选择，不是说它们没有价值。需要时按专题逐项加入，再重新验证行为。
 
-## TodoProvider 让计划有状态
-
-自然语言计划写在聊天里，很容易被后续上下文淹没。TodoProvider 把工作项作为可跟踪的状态，Agent 可以添加、完成、移除和查看待办。
-
-一个实用的待办，应该有可检查的完成条件：
-
-```text
-[ ] 读完文档目录，列出待处理的 12 个文件
-[ ] 为每个文件生成摘要，并保存到指定目录
-[ ] 核对摘要中的链接与原文是否对应
-[ ] 输出失败清单，说明哪些文件没有成功处理
+```csharp
+public static async Task Harness()
+    {
+        using var client = CourseClient.Create();
+        var agent = client.AsHarnessAgent(new HarnessAgentOptions
+        {
+            Name = "LearningHarness",
+            ChatOptions = new() { Instructions = "只规划并讲解学习任务。使用待办跟踪进度。" },
+            DisableWebSearch = true, DisableFileMemory = true,
+            DisableAgentSkillsProvider = true, DisableToolAutoApproval = true,
+        });
+        Console.WriteLine(await agent.RunAsync("规划三个学习RAG的步骤，然后完成第一步的文字讲解。"));
+    }
 ```
 
-“继续努力”“把任务做好”不是可验收的工作项。模型把 todo 标成完成，也不能替代检查输出文件是否真的存在。
 
-## Plan 和 Execute 要有真实边界
 
-AgentModeProvider 提供模式状态，常见的是规划与执行。规划阶段明确目标和步骤，执行阶段根据确定的范围工作。
+## 怎样判断成功
 
-但模式本身不是操作系统权限。系统提示词写“规划阶段不能修改文件”，并不能代替工具层禁用写操作。对于明确需要确认的动作，仍然要使用真正的授权或审批机制。
+应得到学习计划以及第一步的文字解释。默认能力和工具名称可能随框架版本变化，所以先看固定版本文档和 options，而不是依赖博客中的一句“默认全有”。本例没有配置 Shell 工具，也没有授予文件访问目录。
 
-模式切换应尊重用户已经给出的授权，避免每个小步骤都反复打断；任务范围发生实质变化时，则要重新确认具体动作。
+## 自己改一次
 
-## 上下文压缩，是为了继续工作
+对照上一课手工装配的 Agent，列出 Harness 替你提供了哪些运行部件。再挑一项确实需要的能力，查清配置后开启，并设计一个成功和一个失败案例。不要一次加十项能力再猜哪里出了错。
 
-长任务的消息会越来越多。Harness 可以结合压缩策略保留摘要与关键信息，减少上下文负担。
+## 遇到问题先看这里
 
-压缩后至少要知道：原目标、已完成事项、剩余事项、重要约束、产物位置，以及哪些事情尚未验证。不要把失败尝试总结成成功，也不要把用户没授权的动作写进默认计划。
-
-业务状态应保存在结构化存储里，而不是只寄希望于模型记住一段摘要。需要跨进程恢复时，仍然要设计持久化和检查点。
-
-## 文件、工具和后台 Agent 都要有范围
-
-文件记忆帮助保存可复用信息，共享文件访问则是另一种能力。两者应明确目录、读写范围和生命周期。
-
-后台委派可以并行处理互不依赖的子任务，但它会增加成本与合并复杂度。主任务需要知道子任务是谁、输出在哪里、是否完成，以及结果是否经过验证。
-
-工具审批也不能被“长期任务”四个字自动取消。一次允许读取文件，不等于允许删除目录或向外部发布结果。持久授权应有明确范围与撤销方式。
-
-## 长任务真正需要的停止条件
-
-除了最大轮数，还应有总时限、token 或费用预算、连续失败上限，以及明确的完成标准。
-
-任务完成时，检查产物；预算耗尽时，保存进度并报告未完成部分；遇到必须由用户决定的问题，给出具体选项，而不是无限重复同一个失败动作。
-
-可以把验收问题简化为四句：现在在做什么，已经产出了什么，哪里还不确定，下一步依据是什么。运行记录能回答这些问题，Harness 才真正帮上了忙。
+出现额外工具请求时先查看默认配置，不要马上自动批准。上下文整理和循环都需要边界，长任务仍然可能中断。需要恢复时保存实际状态与继续标识；仅把同一句任务再次发给 Harness，并不等于从原位置恢复。
 
 ## 参考资料
 
-- [Microsoft Agent Framework：Harness 架构与能力矩阵](https://learn.microsoft.com/en-us/agent-framework/concepts/harness)
-- [上下文提供器与 Harness 配置](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/conversations/context-providers)
-- [检查点与恢复](https://learn.microsoft.com/en-us/agent-framework/workflows/checkpoints)
+- [Harness Agent](https://learn.microsoft.com/en-us/agent-framework/concepts/harness)
+- [工具批准](https://learn.microsoft.com/en-us/agent-framework/agents/tools/tool-approval)

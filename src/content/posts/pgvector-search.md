@@ -1,10 +1,13 @@
 ---
-title: 用 PostgreSQL 做向量搜索，先跑通再谈调优
-date: 2026-11-20
-summary: 从 pgvector 安装、建表和查询开始，分清精确搜索、HNSW、过滤与混合检索，给知识库一个可检查的底座。
-series: 提示词与知识库
-order: 5
-tags: [PostgreSQL, pgvector, 混合检索]
+title: "用 PostgreSQL 做向量搜索，先跑通再谈调优"
+date: "2026-11-20"
+summary: "从 pgvector 安装、建表和查询开始，分清精确搜索、HNSW、过滤与混合检索，给知识库一个可检查的底座。"
+series: "提示词与知识库"
+order: 3
+tags: ["PostgreSQL","pgvector","混合检索"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["embeddings-schema"]
+goals: ["从 pgvector 安装、建表和查询开始，分清精确搜索、HNSW、过滤与混合检索，给知识库一个可检查的底座。"]
 ---
 
 如果项目已经使用 PostgreSQL，想试一试向量搜索，可以先看 pgvector。它是数据库扩展，不是另开一个聊天模型服务。

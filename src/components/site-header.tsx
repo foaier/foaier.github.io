@@ -4,6 +4,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 const links = [
   { href: "/", label: "首页" },
+  { href: "/learn/", label: "从零学 AI" },
   { href: "/articles/", label: "文章" },
   { href: "/projects/", label: "项目" },
   { href: "/resume/", label: "简历" },

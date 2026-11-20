@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npm run examples:pack",
     "build": "next build",
     "start": "next start",
     "lint": "biome lint src",
     "typecheck": "tsc --noEmit",
-    "content:check": "node scripts/check-content.mjs"
+    "content:check": "npm run examples:pack && node scripts/check-content.mjs",
+    "examples:pack": "node scripts/package-examples.mjs"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

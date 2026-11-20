@@ -1,91 +1,69 @@
 ---
-title: 用 C# 写第一个 Agent：先让它完成一件小事
-date: 2026-11-20
-summary: 从 Microsoft Agent Framework 的最小调用开始，分清模型客户端、Agent 与 Session，再逐步加上业务能力。
-series: Agent 开发
+title: "第一个 Agent：给模型一个明确的工作说明"
+date: "2026-11-20"
+summary: "运行一个真正使用 Agent Framework 的学习助手"
+series: "Agent Framework 入门"
 order: 1
-tags: [Agent Framework, C#, 入门]
+tags: ["Agent Framework 入门","循序渐进"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["first-model-call"]
+goals: ["运行一个真正使用 Agent Framework 的学习助手","分清模型客户端、Agent、指令和一次运行"]
 ---
 
-第一个 Agent 不必同时具备联网、记忆、计划和自动操作。先让它把一段散乱的问题整理成工单摘要，就已经能跑通最重要的调用链路。
+上一课我们向模型发了一条问题。这一课把重复使用的工作说明交给 Agent：回答用中文、先举例子、信息不足时承认不知道。先做一件很小但完整的事，后面再逐步加工具和记忆。
 
-这一篇使用 Microsoft Agent Framework 的 C# 接口。示例基于本文整理时的官方文档，云端调用需要你自己的资源、权限和配额。
+## 这一次增加了什么
 
-## Agent 比一次模型调用多了什么
+模型客户端负责把请求送到模型服务。Agent把指令、工具以及运行过程组织起来。AIAgent是框架里的统一抽象，我们的例子由通用聊天客户端创建一个 ChatClientAgent。它仍然需要底层模型提供推理能力。
 
-模型客户端负责和推理服务通信；Agent 在这上面组织指令、工具、会话和运行过程。一个 Agent 可以很简单，也可以运行多轮工具调用。
+不要因为名字里有Agent，就认为程序一定会自动规划、循环或操作电脑。没有配置的工具，它不会凭空拥有；没有传入的资料，它也不一定知道。先看这个对象实际接了什么，再判断它能做什么。
 
-`AIAgent` 是框架中的统一抽象。`ChatClientAgent` 是常见的应用自管实现，背后连接模型客户端。服务托管 Agent、自定义 `AIAgent` 实现，又属于不同的接入方式，不能只看变量类型就认定执行位置相同。
+## 准备并运行
 
-先使用现成实现，只有当标准生命周期确实无法满足需求时，再考虑继承基类自己实现运行逻辑。
+先完成[环境准备](/articles/dotnet-ai-setup/)，下载并解压[课程示例](/downloads/ai-course.zip)。在解压后的 ai-course 目录打开终端。本篇使用 .NET 10，核心包 Microsoft.Agents.AI 1.28.0；依赖版本已写在项目文件中。
 
-## 准备最小环境
-
-准备 .NET 10 SDK、Azure CLI、一个 Foundry 项目和已部署的模型。登录的开发者身份需要有相应调用权限。
-
-```bash
-dotnet new console -n FirstAgent --framework net10.0
-cd FirstAgent
-dotnet add package Microsoft.Agents.AI.Foundry --version 1.28.0-preview.261106.1
-dotnet add package Azure.Identity --version 1.21.0
-az login
+```powershell
+dotnet run --project Core -- agent
 ```
 
-这里锁定了 Foundry 集成包的预览版本，并以 `net10.0` 为目标完成编译检查；这不表示框架所有包都处于相同发布阶段。不要把不同日期的预览示例随意混用，云端行为仍需在自己的资源上验证。
+需要在线模型的练习，请先在当前终端设置 AI_ENDPOINT、AI_MODEL、AI_API_KEY。不要把网页聊天产品的登录密码当作 API Key。模型调用会消耗所选服务的额度；本地模型则需要相应硬件和运行服务。
 
-设置 `FOUNDRY_PROJECT_ENDPOINT` 为项目终结点，`FOUNDRY_MODEL_DEPLOYMENT` 为部署名。项目地址通常包含 `/api/projects/`，请直接从自己的项目获取。
+## 看完整项目，再看核心调用
 
-## 写出第一次调用
-
-将 `Program.cs` 替换为下面内容，再运行 `dotnet run`：
+Program.cs根据命令选择练习，CourseClient.cs读取模型配置。本篇的代码位于 Core/Lessons/FirstSteps.cs。下面这个方法就是 agent 命令执行的内容：
 
 ```csharp
-using Azure.AI.Projects;
-using Azure.Identity;
-using Microsoft.Agents.AI;
-
-var endpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
-    ?? throw new InvalidOperationException("缺少项目终结点");
-var deployment = Environment.GetEnvironmentVariable("FOUNDRY_MODEL_DEPLOYMENT")
-    ?? throw new InvalidOperationException("缺少模型部署名");
-
-var project = new AIProjectClient(new Uri(endpoint), new AzureCliCredential());
-AIAgent agent = project.AsAIAgent(
-    model: deployment,
-    name: "TicketSummary",
-    instructions: "把问题整理为简短工单摘要。只保留已知事实，不补充处理结果。");
-
-var response = await agent.RunAsync(
-    "我今天上午提交了退款申请，页面一直显示审核中，想问一下该怎么办。");
-Console.WriteLine(response);
-```
-
-这个例子只生成摘要，不会去查询退款系统。因此它不应该声称“退款已到账”或者“已帮你催办”。这就是第一条验收标准：不要把文字生成误当成业务执行。
-
-`AzureCliCredential` 适合这里明确使用 CLI 登录态的本地示例。部署时要使用与环境匹配的身份方式，而不是让服务器依赖某个开发者电脑上的登录状态。
-
-## 流式输出只是显示方式变了
-
-将普通调用替换为下面的片段，可以逐步显示响应：
-
-```csharp
-await foreach (var update in agent.RunStreamingAsync(
-    "请用两句话解释：退款审核中不等于退款已经完成。"))
+public static async Task Agent()
 {
-    Console.Write(update);
+    var agent = CourseClient.Agent("你是学习助手。用中文解释概念，每次给一个生活中的例子。不知道时明确说不知道。");
+    Console.WriteLine(await agent.RunAsync("什么是机器学习？"));
 }
 ```
 
-流式输出让用户更早看到文字，但它不会自动让后台任务可恢复，也不意味着每个片段都是最终结构化结果。连接中断后怎样显示状态、是否允许重试，需要应用继续处理。
 
-## 下一步加什么，按需求决定
+CourseClient.Agent内部调用AsAIAgent，把中文指令、名称以及可选工具传给框架。name用于识别这个Agent，不会让模型自动知道你的项目。instructions定义长期使用的工作要求，RunAsync里的字符串则是这一次的具体问题。
 
-需要多轮对话，就加 Session；需要实时业务信息，就加只读工具；需要固定字段，就加结构化输出；需要跨步骤可靠执行，再考虑工作流。
+这里没有给它任何查资料的工具，因此预期结果只是解释“机器学习”并举例。它没有真正创建课程、保存计划或读取你的文件。判断一个Agent的能力，应当同时看输出和真实的工具执行记录。
 
-别一次把所有功能都打开。每增加一层，留下一条能验证它的样例：工具确实被调用了、会话没有串到别人、输出格式能被程序解析。这样出了问题，也能知道该往哪一层找。
+## 改一次指令，观察行为
+
+先保留问题，把指令改成“面向小学生解释，避免专业术语”，运行一次。然后改成“面向后端开发者解释，给出一个业务分类例子”，再运行一次。比较解释角度如何变化，而不只是字数变化。
+
+你可能发现模型没有完全遵守要求。这说明指令会影响输出，但不是一个硬性程序约束。对于必须满足的规则，比如金额不得超过上限，应用仍然需要自己校验。后面学结构化输出和工具调用时会继续处理。
+
+## 让文字逐步出现
+
+同一个项目还有 stream 命令，使用RunStreamingAsync逐个读取输出更新。把运行命令最后的agent换成stream即可。它让你更早看到内容，适合聊天界面，但不意味着整个任务能在进程关闭后继续执行。
+
+网络中断时，已经显示的半句话不能当作完整成功结果。正式应用应该区分正在生成、完成和失败。本阶段先观察普通输出与流式输出的区别，不需要同时引入Web页面。
+
+## 小练习与验收
+
+把助手改成“只解释一个概念，每次最多三个要点”，分别问机器学习、向量和一个没有提供背景的内部项目名。检查前两次是否给出例子，最后一次是否说明信息不足。
+
+如果只是更换问题就报错，先回到模型调用章节检查服务状态。如果编译报找不到类型，确认使用课程项目的依赖版本。完成后继续 [多轮会话](/articles/sessions-memory/)，亲自观察Agent如何使用上一轮的信息。
 
 ## 参考资料
 
-- [Agent Framework：第一个 Agent](https://learn.microsoft.com/en-us/agent-framework/get-started/your-first-agent)
-- [Agent Framework 概览](https://learn.microsoft.com/en-us/agent-framework/overview/)
-- [Foundry 模型与托管 Agent 的区别](https://learn.microsoft.com/en-us/agent-framework/integrations/by-component/agent-services/foundry)
+- [创建第一个 Agent](https://learn.microsoft.com/en-us/agent-framework/get-started/your-first-agent)
+- [Agent 运行与接口](https://learn.microsoft.com/en-us/agent-framework/concepts/agents/running-agents)

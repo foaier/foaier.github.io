@@ -1,10 +1,13 @@
 ---
-title: 分支、并行、循环：工作流里的三个老问题
-date: 2026-11-20
-summary: 用 if、switch、fan-out 和有上限的循环组织 Agent 任务，重点处理默认分支、部分失败和停止条件。
-series: 工作流实践
-order: 3
-tags: [条件分支, Fan-out, 循环]
+title: "分支、并行、循环：工作流里的三个老问题"
+date: "2026-11-20"
+summary: "用 if、switch、fan-out 和有上限的循环组织 Agent 任务，重点处理默认分支、部分失败和停止条件。"
+series: "工作流实践"
+order: 2
+tags: ["条件分支","Fan-out","循环"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["workflows-nodes-streaming"]
+goals: ["用 if、switch、fan-out 和有上限的循环组织 Agent 任务，重点处理默认分支、部分失败和停止条件。"]
 ---
 
 工作流的名词看起来新，很多问题其实很熟悉：根据条件走不同路径，同时处理几个独立任务，或者重复执行直到满足要求。
@@ -83,6 +86,10 @@ asyncio.run(main())
 这些都需要按框架的实际执行语义验证，不能只凭流程图推断。可以让每个节点输出运行 ID、分支名和轮次，跑一组故意失败的样例，观察事件顺序。
 
 一个可维护的工作流，应该能回答“这次为什么走这条路”，也应该能回答“它什么时候会停下来”。
+
+## 按最小实验逐步运行
+
+从[条件分支](/articles/workflow-branch/)开始，再试[Switch](/articles/workflow-switch/)、[扇出](/articles/workflow-fanout/)和[循环](/articles/workflow-loop/)。这些示例不调用模型，输出是确定的。结构跑明白后，再看[Agent 节点](/articles/workflow-agent-node/)与[混合节点](/articles/workflow-mixed/)，更容易定位类型和数据流问题。
 
 ## 参考资料
 

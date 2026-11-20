@@ -1,10 +1,13 @@
 ---
-title: Embedding 是什么？先把一段话变成“可比较的坐标”
-date: 2026-11-20
-summary: 用相似度小实验理解文本向量，再设计真正能更新、能过滤、能追溯的知识库数据结构。
-series: 提示词与知识库
-order: 4
-tags: [Embedding, 向量数据库, 数据建模]
+title: "Embedding 是什么？先把一段话变成“可比较的坐标”"
+date: "2026-11-20"
+summary: "用相似度小实验理解文本向量，再设计真正能更新、能过滤、能追溯的知识库数据结构。"
+series: "提示词与知识库"
+order: 1
+tags: ["Embedding","向量数据库","数据建模"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["first-model-call"]
+goals: ["用相似度小实验理解文本向量，再设计真正能更新、能过滤、能追溯的知识库数据结构。"]
 ---
 
 用户问“钱什么时候退回来”，文档写的是“退款到账时效”。两句话没有太多相同的字，意思却接近。纯关键词搜索可能漏掉它们，embedding 就是解决这类问题的一种工具。
@@ -21,23 +24,28 @@ tags: [Embedding, 向量数据库, 数据建模]
 
 ## 用三维数字感受一下相似度
 
-真实文本向量通常远不止三维。下面用人造数字演示余弦相似度，只帮助理解计算，不代表某个实际 embedding 模型。
+真实文本向量通常远不止三维。下面用人造数字演示余弦相似度，只帮助理解计算，不代表某个实际 embedding 模型。把代码放入环境准备课创建的 .NET 10 控制台项目 Program.cs，执行 dotnet run 即可，不需要模型密钥。
 
-```python
-from math import sqrt
+~~~csharp
+float[] query = [1f, 0.1f, 0f];
+Console.WriteLine(Cosine(query, [0.9f, 0.2f, 0f]).ToString("F3"));
+Console.WriteLine(Cosine(query, [0f, 0f, 1f]).ToString("F3"));
 
-def cosine(a, b):
-    if len(a) != len(b):
-        raise ValueError("向量维度必须一致")
-    denominator = sqrt(sum(x*x for x in a)) * sqrt(sum(x*x for x in b))
-    if denominator == 0:
-        raise ValueError("零向量没有这里定义的余弦相似度")
-    return sum(x*y for x, y in zip(a, b)) / denominator
-
-query = [1.0, 0.1, 0.0]
-print(round(cosine(query, [0.9, 0.2, 0.0]), 3))
-print(round(cosine(query, [0.0, 0.0, 1.0]), 3))
-```
+static double Cosine(float[] left, float[] right)
+{
+    if (left.Length != right.Length || left.Length == 0)
+        throw new ArgumentException("向量维度必须相同且非空。");
+    double dot = 0, a = 0, b = 0;
+    for (var i = 0; i < left.Length; i++)
+    {
+        dot += left[i] * right[i];
+        a += left[i] * left[i];
+        b += right[i] * right[i];
+    }
+    if (a == 0 || b == 0) throw new ArgumentException("不能比较零向量。");
+    return dot / Math.Sqrt(a * b);
+}
+~~~
 
 第一个结果接近 1，第二个为 0。这里只说明方向更接近，不说明某个回答有多大概率正确。实际使用时，不同模型和距离函数的分数范围、意义也可能不同。
 
@@ -72,6 +80,10 @@ print(round(cosine(query, [0.0, 0.0, 1.0]), 3))
 选型别只看“支持多少亿条”。拿自己的数据测过滤后的召回、更新删除、备份恢复、并发延迟和运维复杂度。开发机上跑得快，不代表租户过滤和真实流量下仍然合适。
 
 SK 的向量存储抽象可以减少部分接入代码，但各后端的索引、过滤与混合检索能力并不完全一致。换连接器以后，仍要重新验证行为。
+
+## 动手接着做
+
+上面的三维例子是数学演示，并没有把文字送给真实模型。接下来进入[第一次生成真实向量](/articles/embedding-first-call/)，下载项目已提供完整 C# 程序，无需再安装 Python。运行后比较两句话的得分，并记录实际模型与维度。
 
 ## 参考资料
 

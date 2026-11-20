@@ -24,6 +24,9 @@ export type PostSummary = {
   series: string;
   order: number;
   readingMinutes: number;
+  prerequisites: string[];
+  goals: string[];
+  level: string;
 };
 
 export type Heading = { id: string; text: string; level: number };
@@ -53,6 +56,9 @@ const getSources = cache(() => {
         series: typeof data.series === "string" ? data.series : "工程笔记",
         order: typeof data.order === "number" ? data.order : 0,
         readingMinutes: Math.max(1, Math.ceil(chinese / 300 + words / 180)),
+        prerequisites: Array.isArray(data.prerequisites) ? data.prerequisites.map(String) : [],
+        goals: Array.isArray(data.goals) ? data.goals.map(String) : [],
+        level: typeof data.level === "string" ? data.level : "",
       };
       return { metadata, source: content };
     });

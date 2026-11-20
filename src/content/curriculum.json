@@ -1,0 +1,104 @@
+[
+  {
+    "name": "AI 基础",
+    "id": "ai-basics",
+    "description": "不用先会写代码。从生活里的例子认识 AI，再学会提问和判断回答。",
+    "audience": "零 AI 基础",
+    "outcome": "能解释大模型的工作方式，写出清楚的提示词，识别不可靠的回答。",
+    "start": "ai-map",
+    "core": true,
+    "recommended": [
+      "ai-map",
+      "llm-tokens-context",
+      "prompt-engineering",
+      "responsible-ai"
+    ]
+  },
+  {
+    "name": "AI 编程起步",
+    "id": "first-app",
+    "description": "装好环境，认识必要的 C# 语法，亲手完成第一次模型调用。",
+    "audience": "准备开始写代码",
+    "outcome": "能创建、配置和运行一个 C# AI 程序，并定位常见调用错误。",
+    "start": "dotnet-ai-setup",
+    "core": true,
+    "recommended": [
+      "dotnet-ai-setup",
+      "csharp-ai-essentials",
+      "first-model-call"
+    ]
+  },
+  {
+    "name": "提示词与知识库",
+    "id": "knowledge",
+    "description": "从检索一段资料开始，理解向量、切分、RAG 和答案引用。",
+    "audience": "已完成第一次模型调用",
+    "outcome": "能解释检索和生成的分工，做出有来源、会拒答的知识问答。",
+    "start": "embeddings-schema",
+    "core": true,
+    "recommended": [
+      "embeddings-schema",
+      "embedding-first-call",
+      "rag-pipeline"
+    ]
+  },
+  {
+    "name": "Agent Framework 入门",
+    "id": "agents",
+    "description": "一次只增加一种能力：会话、工具、结构化输出，再到保存与恢复。",
+    "audience": "会运行 C# 控制台程序",
+    "outcome": "能做一个有会话、能调用工具的 Agent，并理解它与普通模型调用的区别。",
+    "start": "first-agent",
+    "core": true,
+    "recommended": [
+      "first-agent",
+      "sessions-memory",
+      "agent-function-tools",
+      "agent-structured-output",
+      "agent-tool-approval"
+    ]
+  },
+  {
+    "name": "综合实战",
+    "id": "projects",
+    "description": "把检索、模型、工具和评估放进同一个知识助手，完成一次端到端练习。",
+    "audience": "已完成知识库与 Agent 入门",
+    "outcome": "能运行并验收一个小型知识助手，知道如何继续扩展。",
+    "start": "knowledge-assistant-project",
+    "core": true,
+    "recommended": [
+      "knowledge-assistant-project",
+      "agent-evaluation"
+    ]
+  },
+  {
+    "name": "Agent Framework 进阶",
+    "id": "agent-integrations",
+    "description": "按需求选择记忆存储、MCP、Skills、托管工具和模型服务。",
+    "audience": "已完成 Agent 入门",
+    "outcome": "能读懂不同集成的边界，按单个专题接入并验证能力。",
+    "start": "agent-runtime",
+    "core": false,
+    "recommended": []
+  },
+  {
+    "name": "工作流实践",
+    "id": "workflows",
+    "description": "先运行没有模型的图式流程，再加入 Agent、人工输入和检查点。",
+    "audience": "已完成 Agent 入门",
+    "outcome": "能组织多个步骤，观察执行过程，并处理分支、暂停和恢复。",
+    "start": "workflows-nodes-streaming",
+    "core": false,
+    "recommended": []
+  },
+  {
+    "name": "Semantic Kernel 专题",
+    "id": "semantic-kernel",
+    "description": "了解另一套 .NET AI 开发工具，按需要学习 Kernel、插件和过滤器。",
+    "audience": "有 .NET 基础，选读",
+    "outcome": "能理解已有 Semantic Kernel 项目的结构，并与 Agent Framework 区分。",
+    "start": "semantic-kernel-basics",
+    "core": false,
+    "recommended": []
+  }
+]

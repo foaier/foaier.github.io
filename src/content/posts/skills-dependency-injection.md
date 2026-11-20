@@ -1,10 +1,13 @@
 ---
-title: MCP 给工具，Skill 教方法：别把两件事混在一起
-date: 2026-11-20
-summary: 从文件式、代码式、类式 Skill 到组合与依赖注入，把业务方法整理成可维护、按需加载的能力。
-series: Agent 开发
-order: 6
-tags: [Skills, 依赖注入, Agent Framework]
+title: "MCP 给工具，Skill 教方法：别把两件事混在一起"
+date: "2026-11-20"
+summary: "从文件式、代码式、类式 Skill 到组合与依赖注入，把业务方法整理成可维护、按需加载的能力。"
+series: "Agent Framework 进阶"
+order: 17
+tags: ["Skills","依赖注入","Agent Framework"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["agent-function-tools"]
+goals: ["从文件式、代码式、类式 Skill 到组合与依赖注入，把业务方法整理成可维护、按需加载的能力。"]
 ---
 
 “已经接了 MCP，为什么还需要 Skill？”可以拿做报销来理解：工具能查订单、读发票、提交申请；Skill 告诉助手这类任务应该按什么顺序做、参考哪些规则、遇到什么情况停下来。
@@ -87,6 +90,10 @@ Skill 通常先暴露名称和描述，任务匹配后再加载详细指令，�
 文件中的指令也不能覆盖用户的当前要求或应用权限。来自外部来源的技能，先审查再使用；别把“这是技能要求”当成跳过业务授权的理由。
 
 最后用同一组任务比较：不加载技能、加载单个技能、加载组合技能。观察分类正确性、工具调用、读取资料的数量和成本，才知道它究竟帮了什么。
+
+## 按实现方式逐篇练习
+
+先读[文件式 Skill](/articles/agent-skill-file/)，亲手修改 SKILL.md；接着比较[代码式](/articles/agent-skill-inline/)与[类式](/articles/agent-skill-class/)。需要多个技能时看[组合](/articles/agent-skill-composition/)，需要业务服务时看[Skill 与 DI](/articles/agent-skill-di/)。每种形式都在下载项目中有独立命令。
 
 ## 参考资料
 

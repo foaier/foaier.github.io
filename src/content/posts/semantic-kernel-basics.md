@@ -1,10 +1,13 @@
 ---
-title: Semantic Kernel 到底帮我们省了什么代码？
-date: 2026-11-20
-summary: 用一个最小的 C# 控制台程序，认识 Kernel、模型连接器、提示词与插件，顺便聊聊和 Agent Framework 的关系。
-series: 提示词与知识库
+title: "Semantic Kernel 到底帮我们省了什么代码？"
+date: "2026-11-20"
+summary: "用一个最小的 C# 控制台程序，认识 Kernel、模型连接器、提示词与插件，顺便聊聊和 Agent Framework 的关系。"
+series: "Semantic Kernel 专题"
 order: 1
-tags: [Semantic Kernel, C#, .NET]
+tags: ["Semantic Kernel","C#",".NET"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["first-model-call"]
+goals: ["用一个最小的 C# 控制台程序，认识 Kernel、模型连接器、提示词与插件，顺便聊聊和 Agent Framework 的关系。"]
 ---
 
 直接调模型 API，也能做聊天。那为什么还要引入 Semantic Kernel？
@@ -79,6 +82,10 @@ Console.WriteLine(result);
 已有 SK 项目不必为了换名字而全部重写。提示词、插件与模型集成的经验仍然有价值。新项目若重点是 Agent 生命周期、会话、工具循环和工作流，可以直接评估 Microsoft Agent Framework。
 
 不要把旧版 `Semantic Kernel Agent Framework` 的名称，与独立的 Microsoft Agent Framework 包和 API 当作同一个版本系列。看教程时先核对 NuGet 包、命名空间和发布日期，再复制代码。
+
+## 学完亲手试一次
+
+画出 Kernel、模型连接器、插件和业务服务的关系。用同一个“查询课程时长”需求，对照 Agent Framework 的函数工具章节，指出相同职责和不同 API，不要把两套类型混在同一段示例里。
 
 ## 参考资料
 

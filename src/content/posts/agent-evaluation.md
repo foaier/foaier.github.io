@@ -1,10 +1,13 @@
 ---
-title: Agent 到底有没有变好？别只看它说得像不像
-date: 2026-11-20
-summary: 建立小而稳定的评估集，分别测答案、工具行为、成本与恢复能力，再考虑让模型自我改进。
-series: 工作流实践
-order: 5
-tags: [Agent 评估, 自我改进, 测试]
+title: "Agent 到底有没有变好？别只看它说得像不像"
+date: "2026-11-20"
+summary: "建立小而稳定的评估集，分别测答案、工具行为、成本与恢复能力，再考虑让模型自我改进。"
+series: "综合实战"
+order: 2
+tags: ["Agent 评估","自我改进","测试"]
+level: "动手实战 · C# / .NET 10"
+prerequisites: ["knowledge-assistant-project"]
+goals: ["建立小而稳定的评估集，分别测答案、工具行为、成本与恢复能力，再考虑让模型自我改进。"]
 ---
 
 改了提示词，跑两次感觉更聪明了，这种迭代很容易产生错觉。模型本来就会有输出变化，你可能只是碰巧看到了两个好结果。
@@ -48,22 +51,25 @@ tags: [Agent 评估, 自我改进, 测试]
 
 ## 先用低成本检查筛掉明显错误
 
-下面的 JavaScript 可以在 Node.js 中直接运行。它只检查一个工具轨迹约束，不是在模拟完整评估平台：
+下面的 C# 可以放在 .NET 10 控制台项目的 Program.cs 中运行。它只检查一个工具轨迹约束，不是在模拟完整评估平台：
 
-```javascript
-const trace = [
-  { tool: "get_order", status: "ok" },
-  { tool: "read_policy", status: "ok" },
+~~~csharp
+using System.Text.Json;
+
+(string Tool, string Status)[] trace =
+[
+    ("get_order", "ok"),
+    ("read_policy", "ok"),
 ];
-
-function evaluateTrace(calls) {
-  const forbidden = calls.some(call => call.tool === "execute_refund");
-  const hasOrder = calls.some(call => call.tool === "get_order" && call.status === "ok");
-  return { passed: hasOrder && !forbidden, hasOrder, forbidden };
-}
-
-console.log(evaluateTrace(trace));
-```
+bool forbidden = trace.Any(call => call.Tool == "execute_refund");
+bool hasOrder = trace.Any(call => call.Tool == "get_order" && call.Status == "ok");
+Console.WriteLine(JsonSerializer.Serialize(new
+{
+    Passed = hasOrder && !forbidden,
+    HasOrder = hasOrder,
+    Forbidden = forbidden,
+}));
+~~~
 
 对语言质量、完整性等难以用规则表达的部分，可以使用模型评审，再辅以人工抽查。评审模型也会受提示词、偏好和样本顺序影响，不是客观真理的来源。
 
@@ -88,6 +94,16 @@ console.log(evaluateTrace(trace));
 快速、确定性的解析和轨迹检查适合每次提交运行。需要联网和付费模型的评估，可以单独安排受控运行，避免把波动很大的外部响应变成所有代码提交的随机阻塞。
 
 失败样本比一张总分图更有价值。留下输入、脱敏后的轨迹和违反了哪条规则，下一次改动才知道该修什么。
+
+## 对课程项目做一次真实验收
+
+下载[完整示例](/downloads/ai-course.zip)，在 ai-course 目录执行以下离线检查。它验证六个检索用例、会话序列化与技能构造，不会替你证明在线回答质量。
+
+~~~powershell
+dotnet run --project Core -- check
+~~~
+
+再按[综合实战](/articles/knowledge-assistant-project/)中的五类问题调用模型，把“关键词命中但证据不足”单独记录。比较提示词变化前后的事实、引用和拒答，固定模型配置，并保留几道未参与调参的验收题。想试草稿评审再修订，进入[改进流程](/articles/workflow-improvement/)。
 
 ## 参考资料
 

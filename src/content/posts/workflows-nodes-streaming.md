@@ -1,90 +1,62 @@
 ---
-title: Agent 工作流先画清楚，再写节点和流式事件
-date: 2026-11-20
-summary: 用 Executor、边和事件组织一个工单流程，把普通代码、Agent 与子工作流放在合适的位置。
-series: 工作流实践
-order: 2
-tags: [Workflow, Executor, 流式输出]
+title: "第一个工作流：两个 Executor，跑通输入、事件和输出"
+date: "2026-11-20"
+summary: "运行一个不依赖模型的真实 Agent Framework 工作流"
+series: "工作流实践"
+order: 1
+tags: ["工作流实践","循序渐进"]
+level: "工作流入门 · 可离线运行"
+prerequisites: ["agent-function-tools"]
+goals: ["运行一个不依赖模型的真实 Agent Framework 工作流","分清 Executor、边、执行事件和最终结果"]
 ---
 
-一段程序从“问模型一句话”变成“分类、检索、核对、审批、执行”，继续在一个方法里堆 `await`，很快就难看清状态流转了。
+先把模型放到一边，我们用两个普通节点做一个小流程：把输入整理成大写，再给出RAG的解释。这样第一次学习工作流时，只需要关注数据怎样移动，不用同时排查模型额度和提示词。
 
-工作流的作用，是把执行路径显式表达出来。哪个步骤接收什么，完成后发给谁，哪里需要人参与，都能看见。
+## 为什么需要工作流
 
-## 先画一个没有框架名的流程
+应用变复杂后，一个请求可能先校验、再检索、再生成、最后等待人确认。把所有await堆进一个大方法，很难看清每一步的责任。工作流把节点和连接关系显式表达出来，方便检查执行路径和观察中间结果。
 
-```text
-用户问题
-   ↓
-校验输入（普通代码）
-   ↓
-判断意图（Agent）
-   ↓
-查询允许访问的资料（普通代码 / 工具）
-   ↓
-整理答复（Agent）
-   ↓
-校验引用与格式（普通代码）
-```
+Executor是接收输入并完成一项工作的执行器，边把输出送到下一个节点。我们的输入输出都是string，避免第一次就处理复杂消息类型。后面接Agent时会看到ChatMessage与TurnToken，那是额外的协议层，不需要现在一起背下来。
 
-不需要推理的事情，就让普通代码处理。权限检查、金额计算、数据库查询都没有必要为了“全 AI”而变成模型节点。
+## 准备项目并运行
 
-## Executor 是节点，边负责传递结果
+下载[课程示例](/downloads/ai-course.zip)，安装.NET 10 SDK，在ai-course目录执行：
 
-在 Agent Framework 的图式工作流里，Executor 接收输入、执行处理、产生输出。边描述这些值怎样流到下一个节点。
+~~~powershell
+dotnet run --project Workflows -- " rag "
+~~~
 
-输入输出最好是明确类型，而不是所有节点都接受一大段字符串。比如意图节点返回类别和缺失信息，检索节点返回带来源的证据集合，答复节点返回答案与引用编号。
+依赖Microsoft.Agents.AI.Workflows 1.28.0已经写进项目文件。第一次需要下载NuGet包，本篇不访问任何在线模型。项目也包含后续章节的命令分发，因此你可以连续在同一个目录完成整个系列。
 
-这样上游出了问题，可以在节点边界检查。否则一个字段悄悄丢失，后面的模型还可能靠猜补出一段通顺的话。
+## 阅读两个节点的实现
 
-## Agent 节点不是另一个宇宙
+Program.cs底部定义NormalizeExecutor和ExplainExecutor。前者Trim去掉首尾空白并转成大写；后者判断是否为RAG，返回一段固定解释。它们都继承Executor<string,string>，重写HandleAsync。
 
-Agent 可以嵌入工作流，执行需要语言理解和生成的步骤。它仍然要遵守输入、输出、超时和错误约定。
+这两个类型参数分别代表输入和输出。IWorkflowContext用于与运行上下文交互，CancellationToken用于响应取消。当前节点只返回值，不访问外部服务，所以实现很短；以后读数据库或调用模型时，也要保留这些边界。
 
-把多个步骤做成子工作流，适合重复使用的局部流程，比如“解析文档、提取字段、检查必填项”。外层只关心这个模块的契约，内部可以逐渐调整。
+## 把节点接起来
 
-组合时留意状态作用域。两次运行不应该共享上次残留的临时变量，也不要把某个已运行的工作流实例随意当成无状态单例重复使用。
+WorkflowBuilder以normalize为起点，AddEdge连接到explain，WithOutputFrom声明explain的结果是工作流输出。Build创建可运行的图。不要把“最后写在代码里的节点”与“已声明的最终输出”混为一谈。
 
-## 流式事件要区分进度和最终结果
+RunStreamingAsync启动运行并返回StreamingRun。WatchStreamAsync逐个读取事件；ExecutorCompletedEvent说明某个节点完成，WorkflowOutputEvent表示对外输出。流式事件不一定是模型Token，它也可以是普通节点进度。
 
-用户想知道任务在做什么，不一定需要看到每个 token。可以把事件分成节点开始、阶段进展、文本增量、等待输入、失败和完成。
+## 预期结果
 
-以下是应用向前端发送的事件示意，不是框架固定格式：
+~~~text
+normalize: RAG
+explain: 先检索资料，再结合资料生成答案。
+最终结果: 先检索资料，再结合资料生成答案。
+~~~
 
-```json
-{
-  "runId": "demo-run-42",
-  "sequence": 7,
-  "type": "step_completed",
-  "step": "retrieve_policy",
-  "message": "找到 3 条相关资料"
-}
-```
+输入MCP时应该得到这个练习暂不认识的提示。它不会调用模型编造答案。这里的确定性结果非常适合作为第一条工作流验收：输入整理正确、节点顺序正确、最终输出明确。
 
-序号便于前端处理重连和重复事件。最终完成应使用明确的完成状态；“已经显示了一些文字”不能当作整个任务成功。
+## 动手修改与常见问题
 
-从框架事件映射到产品事件时，隐藏对用户没有意义的内部细节，但保留排错需要的关联 ID。敏感参数不要直接推送到前端。
+给ExplainExecutor增加MCP解释，再分别输入rag、MCP和空字符串。若节点没有输出，先检查输入类型与边连接；若程序运行了却没有最终结果，检查WithOutputFrom是否指向正确节点。
 
-## Superstep 不是数据库事务
-
-图式执行会涉及一轮可以推进的节点，官方文档称为 superstep。它与事件和检查点有关，但不能理解为“这一轮的外部操作自动原子提交”。
-
-一个节点调用外部服务成功，另一个节点失败，前一个动作不会因为工作流报错就自行撤销。副作用要用幂等、补偿和状态记录单独处理。
-
-## Mermaid 和 Graphviz 有什么用
-
-框架支持工作流可视化相关能力。导出的图适合检查漏连的边、意外的循环和难以理解的交接关系，也适合评审设计。
-
-不过图描述的是结构，不等于真实运行轨迹。看“这次为什么没走到审批节点”，仍然需要运行事件与日志。把静态图和某一次 run 的事件关联起来，排错才完整。
-
-## 第一版先验边界
-
-分别给每个节点正常输入、空输入和错误输入，再验两个节点之间的数据契约。最后测试一个 Agent 超时，观察下游是否停止、前端是否显示失败。
-
-一张流程图的价值不在节点多，而在每一步的责任足够清楚。
+本系列后面的条件分支、并行和检查点都会复用这些基本概念。先不要一次开启全部能力。你能画出“输入→normalize→explain→输出”，并解释每个箭头传的是什么，就已经具备继续学习的基础。
 
 ## 参考资料
 
-- [Agent Framework：工作流、Executor 与执行模型](https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/)
-- [工作流检查点与 superstep](https://learn.microsoft.com/en-us/agent-framework/workflows/checkpoints)
-- [编排模式概览](https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/)
+- [工作流执行模型](https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/)
+- [工作流与检查点](https://learn.microsoft.com/en-us/agent-framework/workflows/checkpoints)
