@@ -95,6 +95,50 @@ kubectl describe nodes
 ~~~
 
 
+
+## 调度约束从“硬条件”到“偏好”有不同后果
+
+| 机制 | 约束方向 | 常用场景 |
+|---|---|---|
+| nodeSelector | 硬性节点标签条件 | 只运行 Linux、指定硬件类别 |
+| required nodeAffinity | 必须满足 | 必须落在某一地区或节点池 |
+| preferred nodeAffinity | 倾向满足 | 优先使用某一节点池，缺少时仍可运行 |
+| podAffinity / antiAffinity | 和其他 Pod 的同处/分散关系 | 靠近缓存，或分散故障域 |
+| taint / toleration | 节点拒绝，Pod 显式容忍 | 隔离系统节点和专用硬件 |
+| topologySpreadConstraints | 在故障域间控制副本分布 | 避免副本全在同一节点或可用区 |
+
+toleration 只是通行证，不是导航指令；它不会把 Pod 指定到带该污点的节点。nodeSelector 和 required affinity 没有匹配节点时 Pod 就无法调度；preferred affinity 则可能在没有理想节点时退而求其次。
+
+亲和性规则与 requests、卷拓扑一起工作。一个节点即使有空闲 CPU，也可能因 PVC 绑定到另一可用区、污点未容忍或 podAntiAffinity 冲突而被淘汰。
+
+## 读一段 required 和 preferred 亲和性
+
+以下片段要求 Pod 运行在带 workload=api 标签的节点，同时尽量靠近 pool=fast 的节点。required 条件没有候选节点时会保持 Pending；preferred 条件不满足时仍可调度。
+
+~~~~yaml
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: workload
+              operator: In
+              values: [api]
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        preference:
+          matchExpressions:
+            - key: pool
+              operator: In
+              values: [fast]
+~~~~
+
+IgnoredDuringExecution 表示节点标签后来变化时，调度器不会自动驱逐已经运行的 Pod。亲和性字段属于 Pod template，改 Deployment 后会触发新一轮滚动更新。
+
+## 单节点 kind 看不到真正的高可用分散
+
+课程 kind 默认只有一个节点，不能证明反亲和性或 topologySpread 能跨节点分散副本。已有 os-check Job 只能练标签选择；要练多故障域，先创建多节点 kind 集群并给节点设置不同的拓扑标签，再观察 Pod 分布。不要用强硬的 zone 约束去测试单节点集群，否则所有副本都可能 Pending。
+
 ## 生产里怎么用、怎么排障
 
 把关键副本全调度到同一故障域会造成一次节点维护全站不可用。用 topology spread 或反亲和性分散副本，同时确认集群有足够容量容纳约束。污点常用于隔离系统节点或特殊硬件，随意给业务容忍会挤占关键资源；资源利用率和故障域要一起看。

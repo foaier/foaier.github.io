@@ -24,7 +24,7 @@ Service 解决集群内部稳定寻址，Gateway API 把集群入口、监听器
 
 Service 负责集群内稳定地址；云厂商的 LoadBalancer Service 通常对接云负载均衡；Gateway API 把入口拆为基础设施拥有的 GatewayClass/Gateway 和应用团队维护的 HTTPRoute。Kubernetes 约定了这些资源的结构，不会因此替你安装能处理流量的 controller。
 
-Ingress 仍可用，但其 API 已冻结，不再增加功能；新平台设计可评估 Gateway API。入口 controller 需要由环境运营方选择和维护。
+Ingress 仍可用于已有受支持的控制器，但其 API 已冻结；Ingress NGINX 已于 2026 年退休，不应再作为新项目的默认实现。新平台应评估受维护的 Gateway API controller 或其他仍受支持的入口产品。
 
 ## 先确认集群有没有入口实现
 

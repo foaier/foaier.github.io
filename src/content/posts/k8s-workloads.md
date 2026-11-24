@@ -31,6 +31,8 @@ Job 遇到失败会重试，定时任务可能延迟或重复，所以业务逻�
 用官方 BusyBox 镜像创建一次性任务。只打印一句话，不操作数据库。先运行下面命令，完成后查看日志与状态，再删除这个 Job。CronJob 可先读概念，不必为了演示创建一个会不停运行的后台任务。
 
 ~~~powershell
+$context = kubectl config current-context
+if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在课程 kind-course 创建练习 Job" }
 kubectl -n container-course create job course-once --image=busybox:1.37 -- /bin/sh -c "echo course-job-done"
 kubectl -n container-course wait --for=condition=complete job/course-once --timeout=120s
 kubectl -n container-course logs job/course-once
@@ -64,6 +66,31 @@ kubectl -n container-course get jobs,pods
 kubectl -n container-course logs job/os-check
 ~~~
 
+
+
+## 控制器选型要看“要维持什么”
+
+| 工作负载 | 它维持或执行什么 | 适合的任务 |
+|---|---|---|
+| Deployment | 一组可替换的无状态副本 | API、Web 服务 |
+| StatefulSet | 有稳定序号与网络身份的副本 | 需要稳定身份的状态服务 |
+| DaemonSet | 每个符合条件的节点运行一个副本 | 节点日志、监控代理 |
+| Job | 直到成功完成指定次数 | 数据迁移、批处理 |
+| CronJob | 按时间表创建 Job | 定时清理、对账任务 |
+
+StatefulSet 不会自动把数据库变成高可用集群；它提供稳定的 Pod 身份和卷关联，复制协议、选主、备份仍需数据库本身或 Operator 实现。DaemonSet 也不等于“每台物理机必有一个”，节点选择、污点容忍和系统约束都会影响覆盖范围。
+
+## CronJob 不是精确到秒的定时器
+
+CronJob 按 schedule 创建 Job，但控制器协调、集群负载和时钟会带来延迟；长时间任务可能与下一次调度重叠。concurrencyPolicy 可设 Allow、Forbid 或 Replace，但业务仍应能处理重复执行。startingDeadlineSeconds 和历史 Job 保留数量用于控制延迟补跑与对象清理。
+
+~~~powershell
+kubectl -n container-course create cronjob clock-lab --image=busybox:1.36 --schedule='*/2 * * * *' -- /bin/sh -c 'date; echo scheduled-run'
+kubectl -n container-course get cronjob
+kubectl -n container-course get jobs --watch
+~~~
+
+等待下一次两分钟边界触发，按 Ctrl+C 结束 watch，再查看 Job 日志。实验结束后按对象名清理：kubectl -n container-course delete cronjob clock-lab；删除 CronJob 默认不会自动删除已创建的历史 Job，需先查看 jobs，再逐个确认清理。
 
 ## 生产里怎么用、怎么排障
 

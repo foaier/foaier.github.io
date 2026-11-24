@@ -61,6 +61,43 @@ docker image history --no-trunc container-course-api:ci
 docker image ls container-course-api:ci
 ~~~
 
+
+## 这条工作流实际分成两种权限
+
+课程工作流应有两条路径：Pull Request 和手动验证负责编译、构建镜像但不登录仓库；受保护的 main 分支 push 才获得 packages: write 并发布 GHCR。把“只在步骤上跳过登录”当成安全隔离不够，因为同一个 job 的 GITHUB_TOKEN 权限由 job 级 permissions 决定。
+
+~~~text
+pull_request / 手动运行
+  -> 编译源码 -> 构建镜像 -> 不登录、不 push
+
+push 到 main
+  -> 编译源码 -> buildx -> 使用短期 GITHUB_TOKEN 登录
+  -> 发布 sha-<commit> 和 main 分支的 latest
+~~~
+
+工作流触发条件中的 paths 是节省 CI 资源的过滤器，不是访问控制。发布 job 还应明确限制事件类型和分支，并只给它真正需要的权限。workflow_dispatch 从非 main 分支手动启动时可以验证构建，但不应发布。
+
+## 读懂一次绿色运行后仍要检查什么
+
+当前示例会执行 .NET 编译、构建 OCI 镜像并使用 BuildKit GitHub Actions cache；它没有单元测试项目，所以不能把 dotnet build 描述成“测试通过”。如果将来加测试项目，应加入 dotnet test 并在构建镜像之前运行。绿勾只表示定义的步骤成功，仍需核对仓库包的标签、digest、可见性和构建提交。
+
+从日志分别检查：Runner 上使用了哪次提交；Buildx 用的上下文和 Dockerfile；metadata-action 生成了哪些标签；push 是否真的执行；最后写入了哪个 digest。PR 构建镜像成功但 GHCR 没有新 tag，是正确的安全行为。
+
+## 修改工作流后如何安全地验证
+
+先在分支里检查 YAML 结构、路径过滤和 permissions；提交后开 Pull Request，观察它只能运行验证路径；合并到 main 后观察发布路径。不要为了测试把个人 token 写进仓库，也不要用 pull_request_target 加载不可信 PR 代码。
+
+~~~powershell
+git diff --check
+git diff -- .github/workflows/container-course.yml
+~~~
+
+Actions 日志里若出现 denied，先确认发布 job 是否来自 main push，以及 GITHUB_TOKEN 是否有 packages:write。若 PR job 发生权限问题，不要给所有 job 增权；先判断它是否应该拥有该权限。
+
+## 从镜像发布到部署仍然隔着一个验收环节
+
+此工作流只构建和发布镜像，不会 SSH 登录服务器，也不会更新 Kubernetes。把 CI、制品发布和部署拆开，部署方以 digest 更新声明式清单，再检查 rollout、readiness 和业务请求。这样能分辨“镜像发布成功”和“服务运行成功”。
+
 ## 生产里怎么用、怎么排障
 
 可靠发布除了 build 还要做测试、依赖审查、镜像扫描和部署前验收。限制第三方 Action 的版本和权限，保护默认分支，避免来自不可信 PR 的代码读取仓库秘密。生产部署应使用有审批的环境与固定 digest，并保留上一个可用制品；Actions 绿色只说明流水线步骤过了，不代表线上真实流量验证成功。

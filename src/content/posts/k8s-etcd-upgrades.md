@@ -92,6 +92,32 @@ kubectl get pods -A --field-selector=status.phase=Pending -o wide
 kubectl -n kube-system get pods -o wide
 ~~~
 
+
+## 快照成功后至少还要检查什么
+
+etcd 备份要和集群 ID、版本、成员拓扑、证书与恢复说明一起保存。快照文件存在且大小合理，只能证明写出了文件；离线检查快照状态，再在隔离环境恢复并验证关键 API 对象，才说明恢复路径大致可行。还原不是在运行中的集群上覆盖一个文件，必须遵循对应 etcd 与 Kubernetes 的官方灾备步骤。
+
+在 kubeadm 自建集群中，管理员常使用 etcdctl 从本机 TLS endpoint 读取快照，再用兼容版本的 etcdutl 检查文件。下面是命令形态说明，不可原样粘贴：endpoint、CA、client certificate、私钥路径必须按你自己的 kubeadm 静态 Pod 配置确认；托管集群应使用云厂商快照和恢复流程。
+
+~~~~bash
+ETCDCTL_API=3 etcdctl \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/path/to/etcd-ca.crt \
+  --cert=/path/to/etcd-client.crt \
+  --key=/path/to/etcd-client.key \
+  snapshot save /secure-backup/etcd-$(date +%F-%H%M).db
+
+etcdutl snapshot status /secure-backup/etcd-YYYY-MM-DD-HHMM.db --write-out=table
+~~~~
+
+把敏感证书放进 shell 历史或把快照放在同一控制面磁盘上，都会削弱备份价值。快照应加密并存到隔离位置，按保留期轮换；恢复环境需记录 exact Kubernetes/etcd 版本和数据目录策略。
+
+## 节点升级时一次只推进一个故障域
+
+升级前确认版本偏差和插件兼容，确保剩余节点能承载当前 requests。维护一个节点时，先 cordon 阻止新 Pod 调度，再按 PDB 和 DaemonSet 情况 drain，完成节点升级并验证 kubelet、CNI、CSI 和业务请求后再继续下一台。单节点 kind 不适合练 drain，因为它没有可承接 Pod 的备用节点。
+
+PDB 保护 Eviction API 路径中的自愿中断，不是机器故障保险；节点数量不足、PDB 配成 minAvailable 等于当前副本数时，drain 可能一直被阻止。不要使用 --disable-eviction 绕过保护，除非经过变更审批并明确承受中断。
+
 ## 生产里怎么用、怎么排障
 
 升级前检查 API 弃用、PDB、剩余容量、证书、存储插件和回滚边界；升级后核对节点、核心 Pod、工作负载、入口和真实请求。etcd 备份应加密、异地保存并限制读取权限，恢复步骤要有时间目标。控制面故障可能无法靠 kubectl 自救，需要云厂商或集群管理员的带外恢复通道。

@@ -75,9 +75,9 @@ for (const file of files) {
     }
     if (data.series === "Docker 与 Kubernetes") {
       const isFirstLesson = file === "docker-why.md";
-      assert.ok(count >= 900, "Docker/Kubernetes lesson needs a complete lesson, not just a short command list: " + count + " Chinese characters");
+      assert.ok(count >= 1200, "Docker/Kubernetes lesson needs enough explanation to teach a feature, not just outline it: " + count + " Chinese characters");
       assert.ok(headings >= 7, "Docker/Kubernetes lesson is missing explanatory and practical sections: " + headings + " headings");
-      assert.ok(commandExamples >= 1 && codeBlocks >= 2, "Docker/Kubernetes lesson needs runnable commands and an example; found " + commandExamples + " command blocks and " + codeBlocks + " total");
+      assert.ok(commandExamples >= 2 && codeBlocks >= 2, "Docker/Kubernetes lesson needs multiple runnable command examples; found " + commandExamples + " command blocks and " + codeBlocks + " total");
       if (!isFirstLesson) {
         for (const section of ["## 概念讲透：", "## 运行过程拆解：", "## 案例推演", "## 生产里怎么用、怎么排障", "## 怎么确认做对了", "## 留一个小练习"]) {
           assert.ok(content.includes(section), `Docker/Kubernetes lesson is missing ${section}`);

@@ -63,6 +63,42 @@ docker inspect $dbId --format 'Database health={{.State.Health.Status}}'
 Invoke-RestMethod http://localhost:8080/health/ready
 ~~~
 
+
+## Healthcheck 到底测的是谁
+
+healthcheck 在容器内部按间隔运行一条检查命令，依据退出码更新 Health 状态。它检查的是服务是否满足你定义的条件，而不是 Docker daemon 是否正常，也不保证外部网络、TLS、登录权限和真实业务数据都可用。
+
+| 参数 | 作用 | 调得太激进会怎样 |
+|---|---|---|
+| test | 执行什么检查 | 命令不存在或只测端口，产生误判 |
+| interval | 两次检查间隔 | 过短会增加检查负载 |
+| timeout | 单次检查最长时间 | 过短会把慢启动误判失败 |
+| retries | 连续失败几次才 unhealthy | 过少导致抖动，过多延迟发现 |
+| start_period | 启动宽限期 | 太短会误判冷启动，太长会延迟发现故障 |
+
+Compose 的短 depends_on 只保证创建顺序；长格式 condition: service_healthy 会等依赖健康后再启动调用方。它只解决启动阶段的等待，不是持续的故障恢复机制。
+
+## 从 inspect 里看检查结果
+
+课程数据库使用 pg_isready 检查 PostgreSQL 是否能接受连接，API 使用应用自带的健康检查模式。启动后先读状态和最近一次检查，再请求 API 的健康端点。
+
+~~~powershell
+docker compose up --build -d --wait
+docker compose ps
+docker inspect (docker compose ps -q db) --format '{{json .State.Health}}'
+docker inspect (docker compose ps -q api) --format '{{json .State.Health}}'
+Invoke-RestMethod http://localhost:8080/health/live
+Invoke-RestMethod http://localhost:8080/health/ready
+~~~
+
+数据库 Health 为 healthy 表示 pg_isready 成功；API 的 liveness 说明进程能响应，readiness 说明 API 与数据库链路满足课程定义。Healthy 仍不代表每个业务接口都正确，所以还要写入并读回一条测试记录。
+
+## 不要把 unhealthy 和 restart 混为一谈
+
+Healthcheck 连续失败会把状态变为 unhealthy，但 Docker 的 restart policy 主要依据容器进程是否退出；它通常不会仅因 unhealthy 就自动重启容器。诊断时分别看 State.Status、State.Health 和 ExitCode，再决定是应用故障、依赖未就绪还是检查命令写错。
+
+如果把数据库检查写成 curl localhost:5432，可能因镜像没有 curl 而永远失败。检查命令必须存在于目标镜像内，并验证它问的是正确的就绪条件。API readiness 可以依赖数据库，liveness 通常不应因为数据库短暂不可用而让所有 API 进程一起重启。
+
 ## 生产里怎么用、怎么排障
 
 检查项太重会给服务增加负载，超时时间太短会在正常高峰产生误报，太长又会延迟发现故障。每个探测都要明确失败后果和阈值，并验证诊断结果能否区分应用故障与依赖故障。数据库需要恢复时，盲目对所有服务同时重启可能造成连接风暴；使用退避、连接池限制和分批恢复。

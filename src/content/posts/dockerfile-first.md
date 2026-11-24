@@ -86,6 +86,50 @@ docker image ls container-course-api
 ~~~
 
 
+
+## Dockerfile 指令分别改变什么
+
+| 指令 | 改变的内容 | 常见误用 |
+|---|---|---|
+| FROM | 选构建阶段的基础镜像 | 不锁定版本，导致未来重建内容变化 |
+| WORKDIR | 后续相对路径的工作目录 | 假设当前目录总是根目录 |
+| COPY | 把构建上下文文件放进镜像 | 把 .git、bin、obj 和密钥一起复制 |
+| RUN | 构建时执行命令并形成镜像层 | 把只需在运行时做的事写进构建 |
+| ARG / ENV | 构建参数 / 运行时环境变量 | 用 ARG 假装安全保存密码 |
+| EXPOSE | 声明镜像预期使用的容器端口 | 误以为它会把端口发布到宿主机 |
+| USER | 指定后续进程的运行身份 | 长期以 root 运行无必要的业务进程 |
+| ENTRYPOINT / CMD | 定义启动程序及默认参数 | 用 shell 字符串导致信号传递不清楚 |
+
+一个多阶段 Dockerfile 会把 SDK 和编译工具留在 build 阶段，只把发布后的程序复制到 runtime 阶段。这样不是把依赖藏起来，而是让运行镜像只包含服务启动所需文件。
+
+## 读懂课程里的 .NET 多阶段 Dockerfile
+
+下面的命令在解压后的 container-course 目录执行。Dockerfile 先复制项目文件并 restore，再复制源码 publish；后续只把 publish 目录复制进 ASP.NET runtime 镜像。先看每个阶段的基础镜像与产物去向，再运行构建。
+
+~~~powershell
+docker build --progress=plain -t container-course-api:lesson .
+docker image inspect container-course-api:lesson --format 'size={{.Size}} arch={{.Architecture}}'
+docker image history container-course-api:lesson
+docker run --rm -p 127.0.0.1:8089:8080 container-course-api:lesson
+~~~
+
+另开终端请求 http://localhost:8089/health/live。看到响应说明运行时镜像含有应用发布文件并能启动；它不证明数据库配置有效，因为这个单容器实验没有启动 PostgreSQL。停止前先记录启动日志，再在原终端按 Ctrl+C。
+
+## ENTRYPOINT 与 CMD 的差别会影响启动行为
+
+Exec form 例如 ENTRYPOINT ["dotnet", "ContainerCourse.Api.dll"] 会让 dotnet 作为容器主进程，Docker 可以把停止信号发给它。Shell form 会多一层 shell，信号和参数转发可能不同。ENTRYPOINT 通常定义固定程序，CMD 提供默认参数；运行时在 docker run 后加参数，会替换 CMD 的默认参数。
+
+~~~powershell
+docker run --rm container-course-api:lesson --help
+docker run --rm --entrypoint dotnet container-course-api:lesson --info
+~~~
+
+第一条是否能显示帮助取决于应用有没有实现该选项，重点是观察参数被传给默认入口；第二条临时覆盖入口，查看镜像中的 dotnet runtime。诊断完成后别把临时 entrypoint override 写进正式部署配置。
+
+## 安全和可复现的几个检查点
+
+基础镜像优先选受维护的官方镜像，并按团队更新策略固定版本；高保证场景再记录 digest。不要把私钥、连接密码写进 Dockerfile 的 ARG 或 ENV，也不要将宿主机路径假定为固定值。构建完成后检查最终镜像的 USER、入口、端口元数据和包含文件，确认运行阶段不带 SDK、源码仓库和构建凭据。
+
 ## 生产里怎么用、怎么排障
 
 线上构建要避免把开发环境文件、测试密钥和完整 SDK 混进运行镜像。用多阶段构建缩小运行时内容，设置非 root 用户，并验证文件权限、证书和临时目录需求。基础镜像固定到受支持的版本并定期重建获取安全补丁；只追求镜像最小可能导致缺少诊断工具和 CA 证书，得先测试应用真正需要什么。

@@ -64,6 +64,44 @@ kubectl -n container-course get deployment course-api -o jsonpath='{range .spec.
 kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
 ~~~
 
+
+## ConfigMap 和 Secret 的功能边界
+
+ConfigMap 放普通配置，Secret 放凭据或证书；两者都是 Kubernetes API 对象，都会被有权限的主体读取。Secret 的 data 使用 Base64 表示只是编码，不是加密。集群要配置 etcd 静态加密、限制 RBAC 权限并保护备份；有更高要求时通过外部 Secret 管理系统注入短期凭据。
+
+| 注入方式 | 更新后进程看到什么 | 常见限制 |
+|---|---|---|
+| 环境变量 | 旧进程不会自动刷新 | 通常需滚动重建 Pod |
+| Secret/ConfigMap volume | 文件会最终更新 | 应用必须重新读取文件；subPath 挂载不会按普通方式更新 |
+| 启动参数 | 启动时固定 | 需重新创建进程 |
+
+ConfigMap 和 Secret 都不适合放大体积文件。它们有对象大小限制，配置文件较大时应使用镜像、卷或专用配置服务。
+
+## 让配置成为 Pod 模板的一部分
+
+Pod 通过 envFrom、单个 valueFrom 或 volume 引用配置对象。引用名称拼错时，Pod 可能无法启动；Secret key 不存在时也会出现创建错误。改动环境变量后，Deployment 模板应产生新 revision，旧 Pod 不会凭空改变自己的进程环境。
+
+~~~yaml
+env:
+  - name: Logging__LogLevel__Default
+    valueFrom:
+      configMapKeyRef:
+        name: course-settings
+        key: Logging__LogLevel__Default
+  - name: POSTGRES_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: course-db
+        key: password
+        optional: false
+~~~
+
+这个片段展示字段关系，使用前面的 course-settings 和 course-db 对象；实际生产应用只注入它确实要读取的变量。不要因为变量已注入就假设程序读取了它。对环境变量更新，通常要让 Deployment 模板变更或 rollout restart，并确认新 Pod 的时间和 revision。
+
+## 轮换配置后验收新旧实例
+
+更新配置时先确认应用是否支持热加载。若不支持，触发滚动更新后检查新 Pod、EndpointSlice 和业务请求；旧凭据失效的时机应等新版本已成功使用新凭据之后。回滚应用不会自动恢复已经撤销的外部密钥。
+
 ## 生产里怎么用、怎么排障
 
 Secret 会进入 etcd 备份和管理者可读范围，要开启静态加密、限制读取主体、审计访问并建立轮换流程。通过命令行 --from-literal 创建时，值可能留在 shell 历史或进程参数中，生产自动化应安全注入。配置变更前做格式校验和回滚版本，避免错误配置让所有副本同时失去服务。

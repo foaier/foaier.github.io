@@ -69,6 +69,45 @@ kubectl -n container-course rollout status deployment/course-api
 kubectl -n container-course get deployment/course-api -o wide
 ~~~
 
+
+## Deployment 的三层对象关系
+
+Deployment 记录副本目标、更新策略和 Pod 模板；它管理 ReplicaSet；ReplicaSet 维护某一模板版本对应的 Pod 数量。Pod 被删时 ReplicaSet 补副本；模板变化时 Deployment 创建新 ReplicaSet，再按策略替换旧副本。三个对象的名字和 ownerReferences 可用于从现象追到责任控制器。
+
+| 变更 | 通常会发生什么 |
+|---|---|
+| 改 replicas | 同一模板的 Pod 数增加或减少 |
+| 改 template 的镜像或环境 | 创建新 ReplicaSet 并触发滚动更新 |
+| 改 Deployment 说明字段 | 通常不会重建 Pod |
+| 直接删一个受控 Pod | ReplicaSet 补出一个新的 Pod |
+
+selector 负责确定哪些 Pod 属于 ReplicaSet，template.labels 必须匹配它。创建后 selector 通常不可修改，发布前要仔细核对标签；不要让两个 Deployment 同时选择同一组 Pod。
+
+## 做一次可回滚的失败发布
+
+只在 kind-course 练习集群运行。把镜像改为不存在的本地 tag，观察新 ReplicaSet 卡在拉取镜像；然后用 rollout undo 回到上一份正常模板。这个实验会短暂影响课程 API，不碰数据库卷。
+
+~~~powershell
+$context = kubectl config current-context
+if ($context -ne 'kind-course') { throw "当前 context 是 $context；请切换到本地 kind-course 后再练习" }
+kubectl -n container-course rollout history deployment/course-api
+kubectl -n container-course set image deployment/course-api api=container-course-api:missing
+kubectl -n container-course rollout status deployment/course-api --timeout=60s
+kubectl -n container-course get pods -o wide
+kubectl -n container-course describe deployment course-api
+kubectl -n container-course rollout undo deployment/course-api
+kubectl -n container-course rollout status deployment/course-api
+Invoke-RestMethod http://localhost:8080/health/ready
+~~~
+
+status 命令在错误镜像场景中超时是实验预期，不代表整个集群坏了。Events 会出现拉取失败。undo 后等待 API 恢复 Ready，再请求健康接口；如果没有 port-forward，先在另一终端启动 port-forward。
+
+## 更新策略控制发布期间的容量
+
+RollingUpdate 的 maxSurge 允许临时多创建多少副本，maxUnavailable 允许发布期间最多有多少副本不可用。两者共同决定速度和可用性；Pod 的 readinessProbe 决定新副本何时算可服务。设置 maxUnavailable 为 0 仍需要集群有足够资源容纳 surge 副本。
+
+镜像 tag 可变、模板字段不变时，Kubernetes 不一定发起新发布。发布应使用新 tag 或 digest，并通过 rollout history 记录每次 revision。数据库 schema 变更还需保持新旧版本兼容，否则回滚应用镜像也不一定能回滚数据。
+
 ## 生产里怎么用、怎么排障
 
 扩副本能分摊无状态请求，但内存会话、容器本地文件、单次后台任务可能在多副本下丢失或重复。生产部署还要为副本设置资源、探针、拓扑分布和容量预算。手工 kubectl scale 改出的状态可能与 Git 声明不同，下一次自动发布会覆盖它；明确 Git 与集群谁是配置来源。

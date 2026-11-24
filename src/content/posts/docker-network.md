@@ -65,6 +65,39 @@ docker inspect $apiId --format '{{json .NetworkSettings.Networks}}'
 docker compose exec api cat /etc/resolv.conf
 ~~~
 
+
+## Docker 常用网络的工作方式
+
+| 网络类型 | 典型场景 | 容器之间是否有 Docker DNS |
+|---|---|---|
+| 默认 bridge | 单个容器或快速试跑 | 不应依赖容器名 DNS，建议建用户自定义 bridge |
+| 用户自定义 bridge | 单机多容器和 Compose | 可以用容器名或 Compose 服务名找对方 |
+| host | 特定 Linux 场景，共享主机网络 | 没有普通 bridge 的端口隔离方式 |
+| none | 不需要网络的离线任务 | 无外部网络 |
+
+Compose 默认会为一个项目创建专属网络。同一网络里的 API 可以用 db:5432 访问数据库；数据库无需发布宿主机端口。-p 是把主机入口转发到容器，和容器间网络访问是两条不同路径。
+
+## 用一个独立网络验证服务名解析
+
+以下实验创建两个有明确名称的临时容器：web 提供 HTTP，client 通过网络内 DNS 用 web 名称请求它。命令不会暴露主机端口。
+
+~~~powershell
+docker network create net-lab
+docker run -d --name web-lab --network net-lab nginx:alpine
+docker run --rm --network net-lab busybox:1.36 wget -qO- http://web-lab
+docker network inspect net-lab
+docker rm -f web-lab
+docker network rm net-lab
+~~~
+
+预期第三条返回 Nginx 欢迎页 HTML；inspect 中能看到 web-lab 作为网络成员。命令使用的 busybox 镜像第一次运行时需要下载。若提示名称冲突，先确认冲突对象是本课旧实验，再删除对应名字；不要清理所有网络。
+
+## 连接异常时看两端，不要先改 DNS
+
+一个容器访问另一个服务失败，按顺序确认：两者是否加入同一网络；目标名称是否能解析；服务在容器内监听哪个端口；应用是否监听 0.0.0.0；Network/host 防火墙是否允许路径。只有 DNS 解析失败时才重点查名称和网络 DNS；连接被拒绝往往是目标没有监听；超时更可能是路径被丢弃或目标无响应。
+
+对 Compose 服务，先用 docker compose ps 查看服务状态，再检查 docker network inspect 项目网络。把数据库发布到 0.0.0.0 并不是修复 API 到数据库 DNS 的方法，反而扩大了攻击面。
+
 ## 生产里怎么用、怎么排障
 
 生产网络要按信任边界分区，数据库不应和无关公开服务共享可随意互通的网络；数据库端口只开放给需要的应用。排查连接失败按 DNS、路由、监听地址、防火墙、安全组、TLS 和账号权限顺序查。调试工具不要长期加入生产网络，诊断结束后清理临时容器并记录访问范围。

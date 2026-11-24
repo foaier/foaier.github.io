@@ -67,6 +67,52 @@ docker buildx imagetools inspect $image
 ~~~
 
 
+
+## 推送和拉取时每一步发生什么
+
+镜像引用由 Registry 主机、命名空间、仓库和 tag 组成。docker tag 只为本地已有镜像增加一个名字；docker push 按仓库地址上传缺失的层和清单；docker pull 按引用下载清单和当前平台需要的层。私有仓库的认证只影响访问，不会改变镜像内容。
+
+~~~text
+本机 container-course-api:local
+        | tag，不重新构建
+        v
+ghcr.io/组织/container-course-api:sha-提交号
+        | push
+        v
+Registry manifest + image layers + content digest
+~~~
+
+同一个镜像的多个 tag 可能指向相同 digest；同一个可变 tag 以后也可能指向另一个 digest。因此部署清单只写 latest，会让“重新创建”时拿到与昨天不同的内容。
+
+## 在 GHCR 做一次带提交号的发布
+
+在项目根目录执行。先通过组织或账号授权的 GitHub 凭据登录 GHCR，再给当前课程镜像打唯一练习标签。登录时输入的 token 不要写入 shell 命令行或保存到代码库。
+
+~~~powershell
+docker build -t container-course-api:practice .
+docker login ghcr.io --username YOUR_GITHUB_USERNAME
+docker tag container-course-api:practice ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
+docker push ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
+docker buildx imagetools inspect ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
+~~~
+
+使用 GHCR 前确认包的创建者、可见性和访问权限。组织名和镜像名需改成自己的小写地址；私有包不能匿名拉取。发布成功后保存仓库页面给出的 digest，另一台有拉取权限的机器执行 pull 并核对同一 digest。
+
+## 版本标签、digest 和多架构清单
+
+| 引用 | 方便之处 | 风险或限制 |
+|---|---|---|
+| latest | 人手测试容易输入 | 内容会变化，不能表达确切版本 |
+| 语义版本如 1.2.0 | 便于阅读发布批次 | 若允许覆盖，仍可能漂移 |
+| commit SHA 标签 | 可追溯到源码提交 | 仍要确认仓库没有允许覆盖同名标签 |
+| digest | 固定到具体内容 | 可读性差，更新时必须修改引用 |
+
+多架构镜像可能有一个 manifest list，分别指向 amd64、arm64 等平台镜像。一个 tag 可能对应不同架构的内容，但平台选择由 manifest 和拉取主机共同决定。若在 ARM 笔记本和 x86 服务器表现不同，先检查镜像 manifest、架构和构建产物，而不是假设 tag 单独说明了每个字节。
+
+## CI 推送凭据和运行时拉取凭据分开
+
+CI 需要写仓库包，部署集群通常只需要读私有镜像。给它们不同的身份和权限；不要把开发者的个人长期 token 复制到所有节点。镜像拉取失败时，区分名称错误、包不可见、凭据过期和架构不匹配，再查看 Pod 事件或 Registry 错误码。
+
 ## 生产里怎么用、怎么排障
 
 镜像仓库还涉及私有包权限、生命周期清理、漏洞扫描、复制到部署区域和可用性。凭证使用只读拉取权限，CI 的推送 token 与集群拉取凭证分开管理。清理旧 tag 前确认回滚窗口，标签删除并不总代表内容立刻释放；需要供应链保证时再增加签名和来源证明验证。

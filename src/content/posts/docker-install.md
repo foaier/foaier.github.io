@@ -60,6 +60,56 @@ docker info --format 'Engine={{.ServerVersion}} OS={{.OperatingSystem}}'
 docker compose version
 ~~~
 
+
+## 先搞清楚你装的是哪一层
+
+Docker Desktop 通常把 Engine 放在 Linux 虚拟环境里运行，Windows 上多由 WSL 2 承载；Docker Engine 则常直接安装在 Linux 服务器。docker 命令是客户端，负责连接当前 context 指向的 Engine。安装客户端、启动 Engine、下载镜像、运行容器是四个不同动作。
+
+~~~text
+终端里的 docker CLI
+    | 当前 Docker context
+    v
+Docker Engine 是否可连接？
+    | 可连接后
+    +-> 能否从 Registry 拉镜像？
+            | 拉取成功后
+            +-> 容器进程能否启动并访问？
+~~~
+
+## 按系统验证安装，不要先猜网络问题
+
+Windows 先确认 Docker Desktop 已启动，并在 Settings 中启用了使用 WSL 2 的 Linux 容器环境；之后在 Docker Desktop 的 WSL Integration 中勾选正在使用的发行版。macOS 也需要启动 Desktop。Linux 则确认 Engine 服务状态。然后用同一组命令依次检查客户端、服务端和一次实际容器启动。
+
+~~~powershell
+docker version
+docker context ls
+docker context show
+docker info --format 'OSType={{.OSType}} Architecture={{.Architecture}}'
+docker run --rm hello-world
+~~~
+
+Linux 上如果使用 systemd，可另开终端检查：
+
+~~~bash
+sudo systemctl status docker --no-pager
+sudo docker run --rm hello-world
+~~~
+
+hello-world 能输出成功说明 CLI 已连接 Engine、Engine 能创建容器，而且镜像拉取链路可用；它并不能证明端口映射、卷权限或你的业务镜像没问题。OSType 应与要运行的镜像匹配。Windows 上要跑 Linux 容器时，重点检查当前 Desktop 是否切在 Linux containers。
+
+## 连接失败时按层定位
+
+若 docker version 只有 Client，没有 Server，先看 Desktop 是否启动或 Linux 的 docker 服务是否运行。若 Server 有响应但 hello-world 卡在 pulling，检查代理、DNS、仓库访问或公司网络策略。若容器创建成功但命令报架构不匹配，用 docker image inspect 查看镜像 Architecture，并与主机架构核对。
+
+~~~powershell
+docker context ls
+docker context inspect (docker context show)
+docker info
+docker image inspect hello-world --format 'os={{.Os}} arch={{.Architecture}}'
+~~~
+
+Docker context 可以连接不同 Engine，包括远程主机。切换 context 前要看清当前名称和 endpoint；后面的 run、rm、volume prune 都会发往当前 Engine。Linux 把用户加入 docker 组通常等同于授予接近 root 的权限，不要把这一步当成普通无害的“修权限”。
+
 ## 生产里怎么用、怎么排障
 
 线上机器常见问题不是没装 CLI，而是 Docker socket 权限、磁盘分区、代理、仓库证书和 daemon 配置不一致。把用户加入 docker 组通常相当于授予接近 root 的权限，不能当普通只读权限发给所有人。安装升级要固定来源、窗口和回退包；验证服务恢复时同时看 daemon 状态、镜像拉取、容器启动和应用探活，不要只看版本号。

@@ -31,7 +31,8 @@ startup 判断程序是否启动完成，它成功前会压住另外两种探针
 先开着 API 的 port-forward，另一个终端仅在 kind-course 中把数据库降为零，观察 API readiness。实验会中断课程服务，请确保当前只有虚构数据；做完立即恢复数据库。
 
 ~~~powershell
-kubectl config current-context
+$context = kubectl config current-context
+if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在本地 kind-course 中练习" }
 kubectl -n container-course scale deployment/postgres --replicas=0
 kubectl -n container-course get pods -l app=course-api -w
 # 观察 API READY 变为 0/1 后按 Ctrl+C，恢复数据库
@@ -66,6 +67,23 @@ kubectl -n container-course get endpointslice -l kubernetes.io/service-name=cour
 kubectl -n container-course describe pod -l app=course-api
 ~~~
 
+
+
+## 三种探针的后果完全不同
+
+| 探针 | 它在问什么 | 失败后 Kubernetes 做什么 |
+|---|---|---|
+| startupProbe | 程序是否完成启动 | 启动期间先不执行 liveness/readiness；超过阈值后按启动失败处理 |
+| livenessProbe | 进程是否已经无法自愈 | 达到失败阈值后重启该容器 |
+| readinessProbe | 这个副本此刻能否接流量 | 从 Service 的可用 EndpointSlice 后端中移除，容器通常继续运行 |
+
+把“依赖数据库是否通”加进 liveness，可能让数据库短暂故障时所有 API 一起重启，反而制造雪崩。数据库依赖通常属于 readiness 或业务层故障响应；liveness 应只检查进程无法自行恢复的状态。
+
+## 参数决定故障检测速度，也决定误报概率
+
+periodSeconds 是检查间隔，timeoutSeconds 是单次超时，failureThreshold 是连续失败阈值，successThreshold 是恢复所需连续成功次数。startupProbe 的失败预算大约是 periodSeconds × failureThreshold；例如启动需要 40 秒，就不能只给 5 次、每次间隔 3 秒的启动预算。
+
+HTTP 检查要求目标容器在 Pod 网络中能通过指定端口和路径响应。TCP 检查只证明连接能建立，不证明业务请求成功；exec 检查在容器内运行命令，但会增加节点负担。优先选择与应用真实就绪条件接近、又不会依赖外部偶发故障的检查。
 
 ## 生产里怎么用、怎么排障
 

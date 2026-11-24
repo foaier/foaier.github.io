@@ -80,6 +80,47 @@ kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.m
 kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
 ~~~
 
+
+## 集群监控通常由几种组件拼起来
+
+| 组件/数据源 | 提供什么 | 不能单独替代什么 |
+|---|---|---|
+| kubelet / cAdvisor | 节点和容器资源样本 | 应用业务成功率与完整调用链 |
+| Metrics Server | 近期资源指标 API，供 kubectl top、部分 HPA 使用 | 历史时序库和长期容量分析 |
+| kube-state-metrics | Kubernetes 对象状态的 Prometheus 指标 | 容器 CPU/内存采集 |
+| Prometheus | 抓取并保存时序指标、按规则告警 | 日志全文检索和分布式追踪 |
+| Grafana | 查询与展示数据源中的面板 | 数据采集与告警路由本身 |
+| OpenTelemetry Collector | 接收、处理和转发 traces/metrics/logs | 自动替应用生成正确埋点 |
+
+这张表回答“指标从哪来”，不是一份可直接安装的生产架构。生产部署还需为控制器和采集器安排资源、持久存储、升级策略、访问控制和多副本；监控系统自身也要监控。
+
+## 从节点采集到告警大致怎么走
+
+~~~text
+API/节点/容器 -> exporter 或 OpenTelemetry SDK
+             -> collector / Prometheus scrape
+             -> 时序库和日志存储
+             -> Grafana 查询 / Alertmanager 路由
+             -> 值班人按 runbook 处理
+~~~
+
+Metrics Server 的数据保留时间短，适合近期资源查询；Prometheus 通过 scrape 与规则做历史趋势；应用要加 SDK 或 exporter 才能提供请求延迟、错误率和 trace。只安装 Grafana 而没有数据源，仪表盘不会凭空产生指标。
+
+## 先看资源，再定义一次可行动的告警
+
+在资源 API 可用的课程集群中看 Pod 和 Node 指标，再对照 Warning Events。若后续接 Prometheus，常见的 PromQL 形态是按时间窗口计算请求错误比例或容器 CPU 使用率；指标名取决于安装的 exporter 和应用埋点，先在 Prometheus 中查实际序列再写规则。
+
+~~~powershell
+kubectl top pods -n container-course --containers
+kubectl top nodes
+kubectl -n container-course get pods -o wide
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
+一个有用的告警应说明用户影响、触发窗口、值班人和止损步骤。例如“API 5xx 比例连续 5 分钟超过 SLO”比“某 Pod CPU 大于 80%”更直接；CPU 适合作为原因线索，不一定代表用户正在受影响。
+
+避免把用户 ID、完整 URL 或请求 ID 放进 Prometheus 标签，这些高基数维度会让时间序列数量快速增长。它们更适合结构化日志或 trace 属性，并且仍需脱敏与访问控制。
+
 ## 生产里怎么用、怎么排障
 
 监控要围绕用户体验定义 SLI/SLO 和告警阈值，避免每个内部指标都叫 P1。日志保留周期、索引字段和采样率会影响费用与隐私；高基数字段不要直接作为指标标签。告警要有值班负责人、排查链接和止损步骤，发布后观察错误率、延迟和饱和度。

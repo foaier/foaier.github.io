@@ -77,6 +77,47 @@ kubectl -n container-course get pod pod-demo -o wide
 ~~~
 
 
+
+## 每一组字段解决的是什么问题
+
+| 字段 | 读写目的 | 容易混淆的点 |
+|---|---|---|
+| apiVersion / kind | 选 API 对象类型和字段版本 | 版本应以集群支持的 API 为准 |
+| metadata.name / namespace | 给对象命名并划定逻辑范围 | namespace 不是网络防火墙 |
+| metadata.labels | 给对象分类并供 selector 选择 | 同一个标签可能被多个 selector 使用 |
+| spec.containers | 声明镜像、命令、端口、环境和挂载 | containerPort 不会创建主机端口映射 |
+| spec.restartPolicy | 决定容器退出后的 Pod 行为 | 不等于 Deployment 的副本自愈 |
+| status | 控制面和节点报告的观察结果 | 由系统更新，不是期望配置 |
+
+同一 Pod 内的多个容器共享 Pod IP 和端口命名空间，也可以共享声明的 volume；这适合主容器和紧密耦合的 sidecar，不适合把无关微服务塞在一起。容器应有明确的职责和生命周期。
+
+## 用 explain 学会查字段，而不靠复制陌生 YAML
+
+kubectl explain 根据当前集群 API schema 展示字段说明，可以递归查看子字段。先 dry-run 服务器校验，再读对象最终状态与 Events。get -o yaml 中的 status、默认值和系统标签可能不是自己写的。
+
+~~~powershell
+kubectl explain pod.spec.containers
+kubectl explain pod.spec.containers.resources
+kubectl apply --dry-run=server -f k8s/pod-demo.yaml
+kubectl -n container-course get pod pod-demo -o yaml
+kubectl -n container-course describe pod pod-demo
+~~~
+
+explain 显示当前目标集群的 schema；本地 kubectl 版本与服务端版本有差异时，不要假设网上另一个版本的字段完全相同。生产变更应先用 dry-run 和 diff 看 API Server 将接受的内容，再在经过审批的流程里提交。
+
+## Pod 状态读的是过程，不只是最终成败
+
+Pending 通常表示尚未完成调度或卷绑定；ContainerCreating 表示节点正准备镜像、网络或挂载；Running 表示容器进程已运行，但未必 Ready；Succeeded/Failed 对一次性容器更常见。重启次数增加时查看 previous logs 和 termination reason，而不是只看当前一轮。
+
+~~~powershell
+kubectl -n container-course get pod pod-demo -o wide
+kubectl -n container-course get pod pod-demo -o jsonpath='{.status.phase} {.status.containerStatuses[*].state}'
+kubectl -n container-course logs pod-demo --previous
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
+如果容器从未成功启动，logs --previous 可能没有上一轮日志；ImagePullBackOff 也没有应用日志可看，因为应用进程尚未运行。此时要回到 Pod Events 和镜像引用排查。
+
 ## 生产里怎么用、怎么排障
 
 YAML 可以通过代码审查，但“可读”不等于安全。生产清单要校验命名空间、镜像来源、资源请求、探针、权限和 Secret 引用；先用 diff/服务器端 dry-run 看变更，再 apply。删除清单要确认对象所有权和级联影响，尤其不要把有状态卷随手一起删掉。

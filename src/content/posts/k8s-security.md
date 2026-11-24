@@ -64,6 +64,26 @@ kubectl auth can-i get pods -n container-course --as=system:serviceaccount:conta
 ~~~
 
 
+
+## Pod 安全上下文如何落到运行进程
+
+课程 API Deployment 已展示几项常见收紧措施：runAsNonRoot 防止以 root 启动，RuntimeDefault seccomp 使用运行时默认系统调用过滤，allowPrivilegeEscalation=false 阻止进程提升权限，capabilities.drop: [ALL] 移除不需要的 Linux capabilities，readOnlyRootFilesystem 减少容器根文件系统写入。
+
+这些选项会影响应用能否写临时目录、绑定低端口或启动辅助进程。收紧前先盘点实际需要的文件路径和系统调用，再显式挂载 tmp 等可写目录；不能通过 privileged: true 一把打开所有权限来“修复”兼容问题。
+
+## 把安全检查按层做，而不是只检查镜像
+
+| 层 | 关键问题 |
+|---|---|
+| 镜像和供应链 | 来源可信、版本可追溯、依赖有更新、扫描结果已评估 |
+| 进程身份 | 非 root、只给必要 capability、只读根文件系统是否可行 |
+| 集群 API | ServiceAccount 是否需要 token，RBAC 是否最小 |
+| 网络 | Pod 间是否需要 NetworkPolicy，入口是否有 TLS 和身份校验 |
+| 数据 | Secret 加密和轮换，PVC 访问控制，备份隔离与恢复 |
+| 准入 | 是否拒绝特权容器、未批准镜像和危险 hostPath |
+
+NetworkPolicy 是否生效取决于 CNI 插件支持；对象创建成功并不证明数据面正在实施策略。Secret 对象也不因为 Base64 表示就变得安全。生产安全要同时检查 API 权限、etcd 加密、节点访问、审计日志和备份副本。
+
 ## 生产里怎么用、怎么排障
 
 最小权限要覆盖 CI 发布身份、集群操作者、Pod 和镜像仓库。密钥轮换、镜像漏洞响应、基线策略例外和审计日志都要有责任人。不要把 Secret base64 当加密，不要给所有工作负载 cluster-admin，也不要在生产直接执行网上找到的特权调试 Pod。

@@ -61,6 +61,44 @@ docker image inspect container-course-api:context-check --format '{{.Id}}'
 ~~~
 
 
+
+## build 命令末尾那个点到底是什么
+
+在 docker build -f Dockerfile -t api:dev . 中，最后的点是 build context，也就是 Engine/BuildKit 能用于构建的文件集合；-f 只选择 Dockerfile，不能改变上下文范围。Dockerfile 中 COPY 的源路径相对于上下文，不是相对于 Dockerfile 本身。
+
+~~~text
+docker build -f examples/api/Dockerfile examples/
+                                  ^^^^^^^^^^
+                    只有这个目录能作为 COPY 的源文件范围
+~~~
+
+如果 Dockerfile 在 examples/api/Dockerfile，而上下文给成 examples/，COPY api/src/ ... 才能命中该路径。把上下文误设成 examples/api/src 时，Dockerfile 同级文件就不在上下文里，会报找不到文件。实际构建时先核对命令最后一个参数。
+
+## 让上下文变小，也让密钥远离镜像
+
+课程的 .dockerignore 会排除版本控制目录、编译输出和本机生成文件。项目可按语言补充 bin/、obj/、node_modules/、测试结果和临时配置；不要把需要编译的源码目录排除掉。生产仓库通常要排除 .env、私钥和本地证书，即使 Dockerfile 没有 COPY 它们，构建上下文也可能被缓存或传给远程 builder。
+
+~~~powershell
+docker buildx build --progress=plain --load -t container-course-api:context .
+docker image inspect container-course-api:context --format 'id={{.Id}} size={{.Size}}'
+docker history --no-trunc container-course-api:context
+~~~
+
+BuildKit 日志会显示实际传入的上下文大小。改了 .dockerignore 后重新构建，观察上下文上传量是否下降。image history 适合看层和构建命令摘要，但它不是秘密扫描器；如果曾把密钥复制进镜像，删除当前文件也不会从旧层中抹掉，必须轮换密钥并重建。
+
+## COPY 缺文件时按路径逐段排查
+
+先列出构建命令指定的目录，再确认 COPY 源文件位于上下文内、没有被 ignore 规则过滤、大小写与目标平台文件系统一致。不要用 COPY ../secret 把上下文外的文件硬塞进去；BuildKit 会拒绝越界路径，这正是隔离构建输入的保护。
+
+~~~powershell
+Get-Location
+Get-ChildItem
+Get-Content .dockerignore
+docker buildx build --progress=plain --no-cache --load -t context-debug .
+~~~
+
+--no-cache 只跳过层缓存，不会自动修复路径错误；排查后应去掉它。课程压缩包的 Dockerfile 和 .dockerignore 位于同一目录，从该目录运行命令最不容易弄错上下文。
+
 ## 生产里怎么用、怎么排障
 
 构建上下文可能包含仓库中的证书、SSH key、开发配置和个人文件。生产流水线应使用最小的构建目录，禁止依赖开发机上的隐式文件，并对 secret 文件加双重排除与扫描。多项目仓库还要明确上下文根目录，否则 COPY 相对路径会悄悄变化。上下文减小后，远程构建传输和缓存命中通常也更稳定。

@@ -64,6 +64,49 @@ docker image ls nginx:alpine
 ~~~
 
 
+
+## 容器到底由哪些状态组成
+
+一个容器不是单独一个文件夹。它至少有镜像引用、读写层、主进程、网络配置、挂载点和状态。Docker 保存这些元数据，所以容器停止后仍能被 inspect；删除容器会删掉实例的读写层和元数据，但不会自动删掉独立的卷。
+
+~~~text
+同一个镜像 nginx:alpine
+  ├─ 容器 web-a：自己的读写层 + 自己的进程和网络
+  └─ 容器 web-b：另一份读写层 + 另一组进程和网络
+
+镜像只读层可以共享；两个容器的临时改动互不共享。
+挂载到 volume 的目录独立于容器读写层。
+~~~
+
+容器状态通常会经过 created、running、exited、removed。停止容器只是停止主进程；再次 start 是重新启动同一个容器，因此读写层还在。删除后再 run 是创建新容器，旧读写层不再存在。
+
+## 亲手观察读写层和容器生命周期
+
+在练习容器里写一个临时文件，再重启并读取它。随后删除容器并从同一镜像创建新实例，新实例看不到旧文件。这不是数据卷的行为，而是容器可写层只跟当前实例绑定。
+
+~~~powershell
+docker run -d --name layer-lab nginx:alpine
+docker exec layer-lab sh -c 'echo hello-from-this-container > /tmp/lab.txt'
+docker diff layer-lab
+docker restart layer-lab
+docker exec layer-lab cat /tmp/lab.txt
+docker container inspect layer-lab --format 'image={{.Config.Image}} state={{.State.Status}}'
+docker rm -f layer-lab
+docker run --rm nginx:alpine sh -c 'test ! -e /tmp/lab.txt && echo fresh-container'
+~~~
+
+docker diff 会列出容器文件系统相对镜像发生的新增或修改；它不会列出挂载卷里的每个业务文件。重启后能读回，是因为还是原来的容器。最后输出 fresh-container，说明新容器只有镜像内容。
+
+## 名称、标签和摘要各自用来做什么
+
+镜像仓库地址、镜像名和 tag 组合成可读引用，例如 nginx:alpine。tag 是可移动的名字，维护者可以让它指向更新后的内容；digest 是内容摘要，适合记录“这次到底部署了哪份字节”。容器名是运行实例的标识，和镜像 tag 没有绑定关系。
+
+~~~powershell
+docker image inspect nginx:alpine --format 'id={{.Id}} digests={{json .RepoDigests}}'
+~~~
+
+输出里的 ID 是本机镜像配置标识；RepoDigests 在已从仓库拉取的镜像上通常可见。交付记录里建议保存仓库名、tag 和 digest；复现时优先使用 digest。不要把 commit 当成正式镜像构建流程，它省略了可审查的 Dockerfile 和构建来源。
+
 ## 生产里怎么用、怎么排障
 
 常见事故是把上传文件写进容器目录，滚动发布后新容器接管流量，旧文件就像“丢了”。生产文件要落到对象存储或受管理的持久卷，镜像保持可替换。确认镜像内容时看摘要而不只看 tag；核对运行了哪个容器用 docker inspect，看数据去了哪儿则检查 Mounts。清理前先确认卷的用途，镜像和业务数据不是一类东西。

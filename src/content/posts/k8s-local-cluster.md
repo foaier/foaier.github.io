@@ -71,6 +71,53 @@ kubectl cluster-info
 kubectl get nodes -o wide
 ~~~
 
+
+## kind 和真实集群有三个重要差异
+
+kind 把节点作为 Docker 容器运行，集群 API 与 Kubernetes 控制循环都是真的；但节点资源来自一台电脑，kind 不会自动给你云负载均衡器、云盘、企业证书或生产网络隔离。电脑进入睡眠时，集群自然也会停止响应。实验通过只能证明本地配置符合这次练习，不代表线上容量与容灾成立。
+
+镜像是另一个常见边界：docker build 产物保存在宿主机 Engine，kind 节点有自己的镜像存储。没有 kind load 或可访问仓库时，Pod 会尝试从远端拉取同名 tag，常见结果是 ImagePullBackOff。
+
+## 多节点实验：看调度器如何选择 Node
+
+完成单节点课程后，可额外创建一套两 worker 的集群。保存下面内容为 kind-multi.yaml；创建前确认本机有足够内存。这个拓展集群使用单独名称，不影响课程集群 kind-course。
+
+~~~~yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+~~~~
+
+~~~powershell
+kind create cluster --name topology --config .\kind-multi.yaml
+kubectl config use-context kind-topology
+kubectl get nodes -o wide
+kubectl config use-context kind-course
+~~~
+
+输出应有一个 control-plane 和两个 worker，节点变为 Ready 后即可观察课程 Deployment 的 Pod 分布。默认情况下调度器可能将副本放在同一节点；要分散副本需在 workload 中声明 topology spread 或亲和性。完成后可只删除额外集群：
+
+~~~powershell
+kubectl config current-context
+kind delete cluster --name topology
+~~~
+
+删除前确认当前集群名是 kind-course 或 kind-topology，并确认要删的确实是本节额外创建的 topology。不要把 delete 命令改成课程集群名称。
+
+## 每次动手前的集群身份检查
+
+kind 的名字与 kubectl context 通常分别是 course 和 kind-course；这两个名字不同。运行删除、修改副本或清理 namespace 的命令前先看 current-context。若上下文指向公司或云端集群，停止本练习，不要试着“反正只改一个 Pod”。
+
+~~~powershell
+kind get clusters
+kubectl config get-contexts
+kubectl config current-context
+kubectl -n container-course get pods
+~~~
+
 ## 生产里怎么用、怎么排障
 
 本地实验容易把公网集群的资源误删，建议使用专用 namespace、清晰 context 名和脚本里的显式 namespace。kind 节点共享本机 CPU 和内存，Pending 可能是电脑资源不足，不代表生产集群容量配置正确。云上验证还要单独检查云负载均衡、CSI 存储、证书、权限和节点网络。

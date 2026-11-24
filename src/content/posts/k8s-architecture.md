@@ -62,6 +62,50 @@ kubectl get nodes -o wide
 kubectl get pods -A -o wide
 ~~~
 
+
+## 控制面组件不是一个“总管进程”
+
+| 组件 | 主要职责 | 它不负责什么 |
+|---|---|---|
+| API Server | 认证请求、授权、校验对象、提供 Kubernetes API | 不直接替你启动业务容器 |
+| etcd | 持久保存集群对象状态 | 不是业务数据库或日志存储 |
+| Controller Manager | 运行控制器，持续比较期望与现状 | 不承诺每一步立刻完成 |
+| Scheduler | 为尚未绑定节点的 Pod 过滤并选择节点 | 不创建容器进程 |
+| kubelet | 在节点上执行 Pod 规格并汇报状态 | 不负责决定业务副本数 |
+| Container Runtime | 拉取镜像并运行容器 | 不理解 Deployment 的滚动发布语义 |
+| CNI / CSI | 配置 Pod 网络 / 挂接存储 | 插件是否可用取决于集群安装 |
+
+Scheduler 绑定的是 Pod 与 Node 的关系，不是替用户“挑一台机器启动一个容器”。节点 kubelet 观察到已分配给本机的 Pod 后，才调用容器运行时创建容器；网络插件和存储插件还要分别完成自己的工作。
+
+## 把一次 Deployment 拆成可观察的状态变化
+
+控制器处理是异步的。一个成功的 apply 可能只创建了 Deployment 对象；随后 Deployment controller 创建 ReplicaSet，ReplicaSet 创建 Pod，Scheduler 分配节点，kubelet 拉镜像并启动容器。只要某一环没有推进，就能从对应对象和 Events 找证据。
+
+~~~text
+kubectl apply
+  -> API Server 校验并保存 Deployment
+  -> Deployment controller 生成 ReplicaSet
+  -> ReplicaSet controller 创建 Pod
+  -> Scheduler 选择 Node 并绑定 Pod
+  -> kubelet + CRI 创建容器，CNI 配网络
+  -> 探针通过，EndpointSlice 收录就绪后端
+~~~
+
+生产集群的控制面可能由云厂商托管，因此你看不到 API Server Pod 或 etcd Pod；这不代表控制面不存在。先理解服务边界，再按集群类型选择能观察的指标和日志。
+
+## 用 API 健康、节点和 Events 找流程卡点
+
+readyz 检查 API Server 当前就绪状态；节点与 Pod 列表说明工作节点控制循环是否正常。Warning Events 会提示调度失败、拉镜像失败、卷挂载失败等原因，但 Events 会过期，事故发生时要及时收集。
+
+~~~powershell
+kubectl get --raw='/readyz?verbose'
+kubectl get nodes -o wide
+kubectl get pods -A -o wide
+kubectl get events -A --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
+若只有 API 访问失败，先确认 kubeconfig、网络和认证；若 API 正常而 Pod Pending，转查调度事件；若 Pod 已分配节点却容器没起来，再查节点状态、镜像和 kubelet/runtime。不要直接操作 etcd 来“修复”对象状态。
+
 ## 生产里怎么用、怎么排障
 
 控制面 API 不可达时，已有容器可能仍在节点运行，但新对象、调度和扩缩容无法正常推进；etcd 丢失或损坏则影响集群状态恢复。生产里要监控 API 延迟、控制器队列、节点状态和 etcd 容量，并保护管理凭证。排错不要直接修改 etcd；通过受支持的 API 操作并保留审计。

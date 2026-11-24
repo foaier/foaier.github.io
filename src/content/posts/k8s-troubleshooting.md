@@ -69,6 +69,42 @@ kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.m
 kubectl -n container-course describe deployment/course-api
 ~~~
 
+
+## 常见状态对应的第一条证据
+
+| 状态或现象 | 第一处看什么 | 下一步 |
+|---|---|---|
+| Pending | describe Pod 的 FailedScheduling / PVC Events | 比较 requests、节点标签、taints、PVC |
+| ImagePullBackOff | Pod Events 中的镜像地址与错误码 | 核对 tag、架构、imagePullSecret 和节点网络 |
+| CreateContainerConfigError | Events 中缺失的 ConfigMap/Secret key | 检查对象 namespace、名字和 key |
+| CrashLoopBackOff | logs --previous 和 lastState | 看进程退出码、启动参数、依赖和探针 |
+| Running 但 Ready 0/1 | readiness 事件与应用响应 | 查依赖、端口、就绪路径 |
+| Service 503 | EndpointSlice 与后端 Pod Ready | 再查 selector、网络策略和入口 |
+
+这些状态不是最终诊断。比如 CrashLoopBackOff 只说明失败容器在退避后重试，根因可能是配置错误、进程启动失败、探针杀死或依赖不通。
+
+## 一次事故收集最小可复现信息
+
+先确定上下文、namespace、变更时间和影响范围，再收集对象、Events、当前日志与上一轮日志。命令输出可能包含内部地址或业务数据，转发给他人前要做脱敏。
+
+~~~powershell
+kubectl config current-context
+kubectl -n container-course get deployment,replicaset,pods,service,endpointslice -o wide
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+kubectl -n container-course describe deployment/course-api
+$coursePod = kubectl -n container-course get pod -l app=course-api -o jsonpath='{.items[0].metadata.name}'
+kubectl -n container-course logs $coursePod --all-containers=true --tail=100 --timestamps
+kubectl -n container-course logs $coursePod --all-containers=true --previous --tail=100 --timestamps
+~~~
+
+日志中看不到启动前的拉取错误，要回到 Events；上一轮日志为空通常说明容器没有重启或没有上一实例。若对象已经被删除，先查控制器是否重建；不要用反复删 Pod 来替代根因分析。
+
+## 从症状到修复要保留一条因果链
+
+记录“用户看到什么 → 哪个对象异常 → 哪条事件/日志支持判断 → 哪个配置导致它 → 改了什么 → 怎么验证恢复”。只写“重启后好了”无法解释是资源耗尽、节点恢复还是偶发故障，也无法阻止问题再次出现。
+
+修复后至少验证两层：Pod 已 Ready 且进入 EndpointSlice；真实调用方访问服务成功。涉及数据库时再验证业务读写和数据完整性。恢复后补上监控、发布前校验、容量或权限改进，使下一次能够更早发现。
+
 ## 生产里怎么用、怎么排障
 
 事件有保留期限，故障时要尽早收集 kubectl describe、相关时间段日志、版本摘要、指标和变更记录。先止损再修根因，涉及数据写入时避免盲目回滚造成重复或丢数据。值班记录写清影响范围、时间线、证据、修复和预防项，去除用户数据、令牌与内部地址后再共享。

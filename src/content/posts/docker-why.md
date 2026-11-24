@@ -83,6 +83,41 @@ docker rm web
 
 不看上文，试着回答：刚才哪个东西被下载了？哪个东西运行后退出了？Nginx 为什么在浏览器能访问？如果删除 web 容器，Nginx 镜像还在吗？这几个答案就是下一课要继续用的基础。
 
+## Docker 这条链路上分别是谁在干活
+
+敲下 docker 命令时，CLI 通常不是自己去创建 Linux 进程，而是把请求发给 Docker Engine 的 API。Engine 再协调镜像、网络、卷和容器运行时。这里的 daemon 是常驻服务；镜像仓库是存放和分发镜像的远端服务，不是容器运行时。
+
+~~~text
+docker CLI -> Docker Engine API -> containerd / OCI runtime -> Linux 进程与隔离
+                    |                    |
+                    |                    +-> 挂载镜像层、创建网络和容器进程
+                    +-> 管理镜像、容器、网络、卷
+
+本地镜像不存在时：Docker Engine -> Registry 拉取镜像
+~~~
+
+这几个名字回答不同问题：镜像解决“用什么文件和启动参数”，容器解决“这一次进程怎么运行”，网络解决“进程怎么通信”，卷解决“容器替换后数据放哪儿”。Docker 不会替你决定应用该有几个副本，也不自动保证数据库备份正确。
+
+## 做一个最小实验：看命令、镜像和容器的边界
+
+先看 CLI 能否连上 Engine，再运行一个只打印信息就退出的临时容器。这个实验不需要暴露端口，也不会留下停止中的容器。
+
+~~~powershell
+docker version
+docker context show
+docker run --rm alpine:3.21 sh -c 'echo inside-container; uname -s'
+docker ps -a --filter ancestor=alpine:3.21
+docker image ls alpine
+~~~
+
+预期能看到客户端与服务端版本、当前 context、容器内打印的文本。最后的容器列表为空是正常的，因为 --rm 在进程退出后删除了这次实例；alpine 镜像仍保留在本机。若 version 只显示 Client 而没有 Server，问题在 CLI 到 Engine 的连接，不在镜像。
+
+这也解释了“我装了 Docker，怎么还不能访问服务”：装客户端不等于 Engine 正在运行；镜像下载成功也不等于容器启动；容器启动也不等于程序已发布端口。排错时按这条链路一层层验证。
+
+## 容器隔离能解决什么，不能解决什么
+
+容器使用内核提供的进程、挂载、网络等隔离能力，多个容器仍共享宿主机内核。它启动快、镜像便于复制，但隔离程度和故障边界与完整虚拟机不同。容器里的 root 也不应被理解成可以安全地运行任意不可信代码。不要因为“容器化了”就省略最小权限、网络策略、镜像审查和数据备份。
+
 ## 参考资料
 
 - [Docker 入门](https://docs.docker.com/get-started/)

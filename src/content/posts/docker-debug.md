@@ -68,6 +68,52 @@ docker logs --tail 50 exits-now
 ~~~
 
 
+
+## 容器故障先分成四类
+
+| 看到的现象 | 优先检查 | 暂时不要做 |
+|---|---|---|
+| 容器很快退出 | inspect 的 ExitCode、State.Error、logs | 反复 restart 掩盖第一次错误 |
+| 容器运行但访问不到 | 监听地址、端口映射、应用日志 | 先开放所有网卡或关闭防火墙 |
+| 健康状态是 unhealthy | Healthcheck 的测试命令和最近结果 | 把 unhealthy 当成进程已经退出 |
+| 偶发变慢 | stats、应用日志、依赖服务状态 | 只看一次 CPU 快照就改限额 |
+
+容器状态 running 只说明主进程还活着；健康检查的结果是另一份状态。一个容器可以同时是 running 和 unhealthy。查看状态时要把进程、应用和请求路径分开判断。
+
+## 一次失败怎么把证据收齐
+
+创建只用于本节的 web-fail-lab。第二条故意让 Nginx 启动失败，方便观察退出容器；先保留它，再用 logs 和 inspect 找证据。
+
+~~~powershell
+docker run -d --name web-fail-lab nginx:alpine sh -c 'exit 42'
+docker ps -a --filter name=web-fail-lab
+docker logs web-fail-lab
+docker inspect web-fail-lab --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}'
+docker events --since 5m --filter container=web-fail-lab
+docker rm web-fail-lab
+~~~
+
+容器很快变成 exited，退出码是 42。它已经停止，因此 docker exec 无法进入；这是预期行为。现场排查时先复制错误信息、镜像摘要和日志，再删掉临时容器。若日志为空，说明程序可能在写日志前就失败，还需看 Engine 事件、Entrypoint 和启动参数。
+
+## 日志和进程检查各有边界
+
+docker logs 读取容器的 stdout/stderr；应用把日志只写到容器内文件时，logs 不会自动替你找到文件。docker top 看容器相关进程，docker stats 给瞬时资源采样，不替代持续监控。需要进入运行中的容器时用 exec，但不要把容器里的手工修复当成正式修复，重建后这些变化会消失。
+
+~~~powershell
+docker ps --filter name=web
+docker logs --since 10m --timestamps web
+docker inspect web --format 'image={{.Config.Image}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}'
+docker top web
+docker stats --no-stream web
+docker exec web nginx -t
+~~~
+
+上面的命令假设已有名为 web 且仍在运行的 Nginx；如果没有，先按镜像和运行章节创建，不要把其他业务容器改名覆盖。exec 只适合补充证据，比如配置文件是否有效；修改完仍需把变更写回镜像或配置源。
+
+## 从日志里分清应用错误和 Docker 错误
+
+Connection refused 通常说明对端没有在目标地址和端口监听；超时可能是网络路径或对端无响应；HTTP 500 是应用已接到请求但处理失败。容器能启动不代表程序监听了 0.0.0.0，也不代表依赖数据库已就绪。每次排查都记下请求地址、时间、容器 ID、镜像 tag 和首次出现的错误。
+
 ## 生产里怎么用、怎么排障
 
 生产排错保留现场很重要。重启或删除容器可能让当前日志、退出状态和临时文件消失；先复制日志、inspect 摘要和时间线。容器里没有 shell 时，不要假设 exec 一定能用，可以用同网络的诊断容器或临时调试镜像。日志中可能有令牌和用户数据，收集后按访问控制处理，公开工单前先脱敏。

@@ -104,6 +104,39 @@ kubectl -n container-course describe service postgres
 kubectl -n container-course exec deployment/course-api -- cat /etc/resolv.conf
 ~~~
 
+
+## 一次 HTTP 请求可以拆成五个可验证的点
+
+假设 API 请求数据库：先确认调用方是否能查到 Service DNS；然后确认 Service 有 EndpointSlice 后端；之后检查目标端口、CNI 路径和 NetworkPolicy；最后才是数据库认证与 SQL。每个阶段的错误形态不同，抓住第一个失败点能缩小范围。
+
+| 检查点 | 命令或证据 | 说明 |
+|---|---|---|
+| DNS | nslookup 服务名 | 只证明名字能解析 |
+| Service 后端 | get endpointslice | 空后端通常是 selector 或 readiness |
+| TCP 端口 | 临时客户端连接目标端口 | 通不通与 HTTP/数据库认证无关 |
+| Policy/CNI | NetworkPolicy 与插件状态 | 创建策略对象不证明数据面执行 |
+| 应用协议 | readiness、HTTP 响应、数据库日志 | 在连接后查认证和应用错误 |
+
+CoreDNS 处理集群服务名，CNI 连接 Pod 网络，Service 维护稳定虚拟入口，Gateway/Ingress 处理外部请求。它们不是一个“集群网络组件”可以互相替换。
+
+## 从临时客户端验证 DNS 和 HTTP
+
+课程 API 同 namespace 有稳定服务名。用短期 BusyBox 查 DNS，再用 curl 镜像访问健康接口。临时 Pod 退出后会删除，不需要修改课程 Deployment。
+
+~~~powershell
+kubectl -n container-course run dns-lab --rm -i --restart=Never --image=busybox:1.37 -- nslookup course-api
+kubectl -n container-course run http-lab --rm -i --restart=Never --image=curlimages/curl:8.12.1 -- http://course-api/health/ready
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o wide
+~~~
+
+DNS 输出返回 ClusterIP；curl 返回 ready 且数据库连接可用；EndpointSlice 应列出就绪 API Pod。若镜像拉取失败，先看临时 Pod Events，不能把这次失败直接归咎于网络策略。
+
+## NetworkPolicy 为什么容易把 DNS 一起拦掉
+
+NetworkPolicy 默认采用允许集合语义；当某 Pod 被某类方向策略隔离后，只能通过匹配规则的流量。默认拒绝 egress 后，如果没有允许访问 kube-dns 的 UDP/TCP 53，应用可能连服务名都解析不了。策略作用于 Pod 标签和 namespace 标签，维护标签权限也是策略边界的一部分。
+
+课程数据库策略只限制入站到 5432，没有限制数据库出站，也没有为整个 namespace 建立默认拒绝。生产环境要先列出 DNS、入口、监控、数据库和外部 API 的必要流量，再分阶段启用，逐条测允许和拒绝场景。
+
 ## 生产里怎么用、怎么排障
 
 NetworkPolicy 新规则可能默认拒绝 DNS、监控或数据库流量，造成上线后多个依赖同时不可达。先在测试 namespace 按允许列表逐条加策略并观察日志，验证策略插件支持 ingress/egress。抓包和诊断容器要经过授权，生产网络上的请求可能包含敏感数据。

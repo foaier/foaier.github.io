@@ -69,6 +69,53 @@ kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.m
 kubectl -n container-course describe deployment/course-api
 ~~~
 
+
+## 滚动更新的三个条件要同时成立
+
+Deployment 更新模板后创建新 ReplicaSet，再根据 maxSurge 和 maxUnavailable 调整新旧 Pod。新 Pod 只有通过 readiness 后才会被 Service 接流量；如果镜像拉取失败或探针配置错误，旧副本可能继续承载流量，发布则停在 Progressing。
+
+maxSurge 控制升级时最多多出多少副本，maxUnavailable 控制最多允许多少副本不可用。副本少、启动慢或节点资源不足时，保守策略会让更新更安全但更慢。readiness 通过只证明探针定义的条件，不证明完整的业务迁移和数据一致性。
+
+## 用新镜像 tag 做一次可回滚发布
+
+先在课程目录构建 v2 镜像并载入 kind，再更新 Deployment。这里镜像内容与本地版本相同，重点是观察一个新模板 tag 如何触发新 revision；若要演示真实代码变化，可先修改 API 响应并重新构建。
+
+~~~powershell
+$context = kubectl config current-context
+if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在本地 kind-course 练习" }
+docker build -t container-course-api:v2 .
+kind load docker-image container-course-api:v2 --name course
+kubectl -n container-course set image deployment/course-api api=container-course-api:v2
+kubectl -n container-course rollout status deployment/course-api --timeout=180s
+kubectl -n container-course rollout history deployment/course-api
+Invoke-RestMethod http://localhost:8080/health/ready
+~~~
+
+容器名 api 来自 Pod template。新 ReplicaSet 创建后，新 Pod 要通过 startup/readiness 才会进入后端。若没有 port-forward，另开终端运行 kubectl -n container-course port-forward service/course-api 8080:80。
+
+## 回滚回的是模板，不是所有数据
+
+如果发布后接口失败，可在确认当前 context 后 undo 到前一个 revision。命令只回滚 Deployment 模板，不会自动回滚数据库 schema、已经写入的记录或外部消息。
+
+~~~powershell
+kubectl -n container-course rollout undo deployment/course-api
+kubectl -n container-course rollout status deployment/course-api
+kubectl -n container-course rollout history deployment/course-api
+kubectl -n container-course get pods -l app=course-api -o wide
+~~~
+
+生产发布前要考虑新旧应用同时运行期间的数据兼容。较安全的数据库迁移通常分为“先加兼容字段、应用升级、确认稳定、再删除旧字段”，而不是先破坏旧版本依赖的数据结构。
+
+## 发布卡住时看条件和事件，不要盲目重启
+
+先看 Deployment conditions 和 rollout status，再看新旧 ReplicaSet、Pod 的镜像、探针和 Events。ProgressDeadlineExceeded 说明在给定期限内未观察到进展，是诊断信号，不会自动把应用回滚到旧版本。
+
+~~~powershell
+kubectl -n container-course describe deployment course-api
+kubectl -n container-course get rs,pods -l app=course-api -o wide
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
 ## 生产里怎么用、怎么排障
 
 零停机不是设置 maxUnavailable=0 就自动得到。容量不足时新旧 Pod 可能无法同时放置，探针误报会阻塞发布，优雅终止不足会中断长请求。生产发布要配合变更窗口、告警观察、自动暂停条件和清晰回滚人；流量切换后再验证真实请求与错误率，而不只看 Pod 全绿。

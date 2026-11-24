@@ -63,6 +63,46 @@ docker compose ps --all
 docker compose logs --tail 50 api db
 ~~~
 
+
+## Compose 文件里的每一层各管什么
+
+| 配置 | 负责什么 | 课程例子 |
+|---|---|---|
+| services | 定义 API、数据库等可运行服务 | api、db |
+| image / build | 使用现有镜像，或从 Dockerfile 构建 | api 用 build，db 用 postgres 镜像 |
+| environment | 给进程传入配置 | API 连接字符串、数据库名 |
+| ports | 发布到宿主机的网络入口 | API 的 8080 只绑定本机回环地址 |
+| volumes | 把数据放到容器生命周期之外 | PostgreSQL 使用 course-data |
+| networks | 给同项目服务提供隔离网络和 DNS | API 通过 db 服务名访问数据库 |
+| depends_on / healthcheck | 控制初始启动顺序并判定服务健康 | API 等待数据库健康 |
+
+Compose 的项目名是隔离边界之一。同一目录默认会使用目录名作为项目名，并为服务、网络和卷加前缀；使用 -p 指定名字可以让不同实验互不冲突。
+
+## 先解析配置，再启动服务
+
+Compose 会处理 YAML、环境变量替换、默认网络和卷。启动前先确认它最终解析出的服务名、镜像和端口。完整 config 可能包含环境变量里的密码，只在本机查看，分享前要脱敏。
+
+~~~powershell
+docker compose config --services
+docker compose config --images
+docker compose ps
+docker compose up --build -d --wait
+docker compose ps
+docker compose logs --tail 30 api db
+~~~
+
+首次 up 会构建 API 镜像、拉取 PostgreSQL，再创建网络、卷和容器；之后命令会复用可用镜像。--wait 等待容器达到 running/healthy 条件，仍需从 API 请求 /health/ready 和业务接口验证真实链路。
+
+## 服务名就是 Compose 网络里的稳定地址
+
+Compose 会把服务名注册到项目网络的 DNS。API 使用 Host=db、Port=5432 连接数据库，不应写数据库容器 IP；IP 会随重建变化。容器内访问 db:5432 不会经过主机发布端口。如果数据库没有 ports 映射，仍能被同网络的 API 访问。
+
+课程的 API 对宿主机只绑定 127.0.0.1:8080，数据库没有对宿主机发布端口。这样本机可以练习 HTTP 接口，数据库则保持在内部网络。生产环境还需限制其他服务是否能加入项目网络。
+
+## 多环境配置不要把本地密码提交进仓库
+
+Compose 支持从环境变量插值。可用 .env 放非秘密的本机参数，但 .env 不是安全的秘密管理系统；检查 .gitignore，避免把个人凭据提交。部署环境应从 GitHub Environment、云 Secret Manager 或受保护的运行平台注入凭据。
+
 ## 生产里怎么用、怎么排障
 
 单机 Compose 上线前要明确单点主机、磁盘损坏和整机故障怎么处理，不能把 restart: unless-stopped 误当成高可用。限制日志大小、规划卷备份、固定镜像版本、保护 .env，并把升级和回滚步骤写成可重复操作。多个主机和自动调度是编排平台要解决的问题，先判断规模和运维能力再迁移到 Kubernetes。

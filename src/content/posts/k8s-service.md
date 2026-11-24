@@ -64,6 +64,46 @@ kubectl -n container-course describe service course-api
 kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
 ~~~
 
+
+## Service 类型决定的是入口范围
+
+| 类型 | 入口范围 | 依赖与注意点 |
+|---|---|---|
+| ClusterIP | 集群内部虚拟地址，默认类型 | 常用于 API 调用数据库或其他服务 |
+| NodePort | 每个节点上一个端口 | 端口范围受集群配置约束，外部防火墙仍需放行 |
+| LoadBalancer | 由外部实现分配入口 | 常依赖云控制器或 MetalLB，可能产生费用 |
+| ExternalName | DNS CNAME 到外部域名 | 不代理流量，不会生成 Pod EndpointSlice |
+| Headless（clusterIP: None） | DNS 返回后端地址而非 ClusterIP | 常用于 StatefulSet 身份发现，不是普通负载均衡入口 |
+
+服务类型不是“从不安全到安全”的等级。对外提供 HTTP 常用受维护的 Gateway/入口实现；数据库通常只用 ClusterIP，并由网络策略控制哪些 Pod 可以连接。NodePort 和 LoadBalancer 也不会自动加 TLS、身份认证或 WAF。
+
+## 端口映射必须沿着名字和数字读到底
+
+Service 的 port 是客户端访问 Service 的端口，targetPort 是 Pod 上接收流量的端口；targetPort 可以写数字，也可以引用 Pod 声明的命名端口。课程 API 的 Service 暴露 :80，并把它转到容器的命名端口 http，即 :8080。
+
+~~~yaml
+ports:
+  - name: http
+    port: 80
+    targetPort: http
+selector:
+  app: course-api
+~~~
+
+这段需和 Pod template 中的 labels 对照；Pod 声明 ports.name 为 http、containerPort 为 8080 时，Service 才能按名字找到目标端口。containerPort 是元数据，不会替进程监听端口，也不会创建 NodePort。
+
+## CoreDNS 返回 ClusterIP，不代表后端已经可用
+
+Service DNS 的短名在同 namespace 可用；跨 namespace 可以用 service.namespace，完整名称通常是 service.namespace.svc.cluster.local，但集群域可能被管理员改过。DNS 返回地址后还需 EndpointSlice 有就绪后端、CNI 连通和容器正确监听。排障时把解析、服务端口、后端端口和应用协议分开验证。
+
+~~~powershell
+kubectl -n container-course get service course-api -o jsonpath='{.spec.clusterIP}{" : "}{.spec.ports[0].port}{" -> "}{.spec.ports[0].targetPort}{"\n"}'
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o yaml
+kubectl -n container-course run service-dns-lab --rm -i --restart=Never --image=busybox:1.37 -- nslookup course-api.container-course.svc.cluster.local
+~~~
+
+EndpointSlice 是由控制器维护的后端分片，不应手工把 Pod IP 固定进去。selectorless Service 可以配合手工 EndpointSlice 指向集群外服务，但要自行负责地址更新、健康检查和安全边界。
+
 ## 生产里怎么用、怎么排障
 
 外部 Service 类型会产生云资源和费用；内部 ClusterIP 虽不可直接从集群外访问，仍要配合网络策略和身份校验。长连接、会话粘滞和客户端连接池会影响流量切换，滚动发布时需验证旧连接如何结束。发现部分用户错误时要比较各后端版本和就绪状态，而不是只测一次 DNS。

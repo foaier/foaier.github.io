@@ -65,6 +65,31 @@ kubectl -n container-course rollout history deployment/course-api
 ~~~
 
 
+
+## CI、镜像仓库和 GitOps 各负责一段
+
+| 环节 | 典型负责人 | 产物或状态 |
+|---|---|---|
+| CI | GitHub Actions 等 Runner | 测试报告、镜像 digest、供应链元数据 |
+| 镜像仓库 | GHCR 或企业 Registry | 可拉取的不可变制品 |
+| 部署仓库 | 平台/应用团队 | 环境期望版本、YAML/Chart/values |
+| GitOps controller | 集群内 Flux、Argo CD 等 | Git 与实际集群状态的持续对账 |
+| 运行验收 | 业务与平台团队 | rollout、健康请求、告警和回滚证据 |
+
+CI 把镜像发布成功，不代表集群已经部署；GitOps 对账成功，也不代表请求链路和数据迁移正确。每一段都需要独立的权限和验收条件。
+
+## 漂移为什么会被自动改回去
+
+GitOps controller 周期性读取受信任分支的期望对象，与 live state 做比较。手工 kubectl scale 造成副本数不同后，controller 会再次应用 Git 里的副本数；这不是随机覆盖，而是声明式控制的核心行为。事故中的临时修复要记录，并通过 PR 把长期需要的状态提交回配置仓库。
+
+敏感值不应以明文进入 Git。常见做法包括外部 Secret controller、加密后提交的 Secret 文件或云端身份短期取密；具体选型要验证密钥轮换、审计和恢复流程。Git 只读权限也要限制到必要仓库和分支。
+
+## 上线前设计一条能回滚的变更路径
+
+新版本镜像先由 CI 产出 SHA 标签和 digest；PR 更新部署仓库中的镜像引用、资源和配置；审查通过后 controller 同步；发布后观察 Deployment condition、就绪副本、错误率和真实请求。失败时回滚配置提交或提交一个指向旧 digest 的新变更，保留完整审计历史。
+
+集群 controller 失联时已有工作负载可能继续运行，但新变更和漂移修复停滞。应监控最近同步时间、错误状态、仓库认证和 API 访问；恢复后先检查差异再让它自动协调，避免一次性应用过多积压变更。
+
 ## 生产里怎么用、怎么排障
 
 GitOps 仓库的写权限就是部署权限，应保护分支、审查变更并分环境隔离凭证。控制器失联时集群已有 Pod 可能继续运行，但新变更和漂移修正会停滞；要监控同步状态与错误。Secret 使用密钥管理或加密方案，不能因为 GitOps 就把生产密码明文提交。

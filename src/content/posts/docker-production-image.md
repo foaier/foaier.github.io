@@ -64,6 +64,36 @@ docker image inspect container-course-api:prod-check --format 'size={{.Size}} us
 ~~~
 
 
+
+## 生产镜像至少要检查这五件事
+
+1. **可追溯**：基础镜像与依赖有版本，构建结果能对应提交。
+2. **小而够用**：使用多阶段构建，运行阶段不携带 SDK、编译器和源码仓库。
+3. **权限收紧**：能用非 root 身份运行就不要用 root；不要随手加 privileged。
+4. **退出正确**：主进程能接收 SIGTERM 并完成清理，避免 shell 包装层吃掉信号。
+5. **可更新**：基础镜像、操作系统包和应用依赖有明确更新周期，不把“最小镜像”误当作免维护。
+
+镜像变小有利于传输，但 distroless 或极简镜像可能没有 shell 和常见排错工具。生产环境要准备外部观测、临时调试方案和可复现的重建流程，不能指望上线后进入容器手工装工具。
+
+## 逐层检查课程镜像
+
+在课程目录构建镜像，再查看基础层、最终入口、用户和架构。docker history 中若看到 SDK 只出现在中间 build 阶段是正常的；最终镜像应来自 aspnet runtime 阶段。
+
+~~~powershell
+docker build --pull --progress=plain -t container-course-api:prod-check .
+docker image inspect container-course-api:prod-check --format 'user={{.Config.User}} entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}} arch={{.Architecture}}'
+docker image history container-course-api:prod-check
+docker run --rm -p 127.0.0.1:8090:8080 container-course-api:prod-check
+~~~
+
+另开终端请求 http://localhost:8090/health/live，然后结束容器。用户字段应为运行时镜像定义的非 root UID；这只说明镜像默认身份正确，不代表应用不需要的 Linux capabilities 已全部移除，也不代表文件系统已经只读。
+
+## 常见的生产加固项和代价
+
+非 root 用户会要求挂载目录有正确的 UID/GID；只读根文件系统能减少意外写入，但应用需要临时目录时要显式挂载 tmpfs 或可写卷。运行时不要用 --privileged 绕过权限问题；先确定程序需要访问的文件、端口和 capability。
+
+基础镜像 tag 可能被更新，digest 可以固定内容但也会阻止自动获得安全更新。生产策略通常是定期重建、扫描、测试并发布新 digest，而不是永久 pin 在一个没人更新的旧版本。镜像扫描发现漏洞也需结合实际可利用性和升级路径处理，不能只追求扫描报告为零。
+
 ## 生产里怎么用、怎么排障
 
 上线镜像还要考虑基础镜像补丁、镜像来源、漏洞扫描、SBOM、签名和保留回滚版本。以摘要部署，更新基础镜像后重新构建并做回归；只看镜像体积小不小不够。最小化镜像会让现场排查更难，可通过日志、指标和受控的临时诊断容器解决，避免在正式镜像里常驻编译器和调试工具。

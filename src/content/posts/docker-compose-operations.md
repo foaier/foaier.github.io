@@ -76,6 +76,54 @@ docker compose exec -T db dropdb -U course course_restore
 
 这验证的是逻辑导出与恢复的基本路径。生产系统还要量出恢复用时、允许损失的数据时间窗口，以及备份期间持续写入时的一致性要求，再决定是否需要 WAL 归档和时间点恢复。
 
+
+## Compose 日常命令分别会不会重建容器
+
+| 命令 | 作用 | 对数据的影响 |
+|---|---|---|
+| up -d | 创建或按配置更新服务 | named volume 通常保留 |
+| stop / start | 停止或启动现有容器 | 不删除容器和卷 |
+| restart | 重启现有容器 | 保留容器写入层和卷 |
+| logs / exec | 查看输出或临时进入运行容器 | 不改变部署定义 |
+| down | 删除项目容器和网络 | 默认保留 named volume |
+| down -v | 连项目卷一起删除 | 卷内数据会删除 |
+
+Compose 是声明式工具：修改 compose.yaml 后重新 up，Compose 会比较期望配置并按需重建容器。手工 docker run 创建的容器不属于该项目的服务状态。
+
+## 一次日常巡检和安全重启
+
+先看项目名、容器状态和最近日志；确认数据库和 API 的健康后，再按服务名重启 API。重启后验证就绪接口和一条业务读请求。
+
+~~~powershell
+docker compose ps
+docker compose logs --tail 50 api
+docker compose restart api
+docker compose ps
+Invoke-RestMethod http://localhost:8080/health/ready
+Invoke-RestMethod http://localhost:8080/visits
+~~~
+
+在解压后的 container-course 目录运行这些命令，保持与启动课程环境时相同的工作目录。若平时启动时指定过 -p，就要在这些命令里使用同一个项目名；换项目名会让 Compose 创建另一套容器、网络和卷。
+
+## 扩缩容前先看端口和状态存储
+
+课程 API 固定把 8080 发布到宿主机，直接把它扩成多个容器可能发生主机端口冲突。多副本服务应让副本只在内部网络监听，由一个负载均衡入口承接主机端口；数据库也不能只靠把副本数调大来获得安全的高可用。
+
+改变 Compose 配置后先运行 docker compose config 校验，再执行 up。要更新镜像可先 pull 或 build，再观察 ps、logs 和健康检查。回滚到旧镜像版本时同样需要确认标签是否指向预期摘要。
+
+## 释放空间前先判定卷是否有用
+
+docker compose down -v 会删除项目卷，开发时可能正好删掉唯一一份数据库数据。清理前先查卷、备份状态和目标项目；对于其他服务，不要在不理解数据生命周期时使用系统级 prune。
+
+~~~powershell
+docker compose ls
+docker volume ls
+docker system df
+docker compose down
+~~~
+
+最后一条保留 named volume。若确实要删除课程练习数据，应单独运行 down -v 并再次确认项目和数据无需保留。
+
 ## 生产里怎么用、怎么排障
 
 备份策略要写清 RPO（最多能丢多少数据）和 RTO（多久恢复），并覆盖恢复权限、加密密钥、存储保留和异地副本。恢复会覆盖数据，必须核对目标实例并避免覆盖线上库。日志命令可能暴露连接串，分享前脱敏；执行 down、删除卷或切换数据库版本前先做影响确认和恢复点记录。

@@ -70,6 +70,45 @@ Invoke-RestMethod http://localhost:8080/visits
 Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType 'application/json' -Body '{"note":"capstone-smoke"}'
 ~~~
 
+
+## 结业验收按证据打勾，不按“命令跑过”打勾
+
+| 能力 | 验收证据 |
+|---|---|
+| 构建镜像 | build 成功，能读出镜像用户、入口和架构 |
+| 运行 Compose | API Ready，写入的虚构记录能读回 |
+| 发布 K8s 应用 | Deployment rollout 完成，Service 有就绪 EndpointSlice |
+| 解释故障 | 能用 Events/日志说明问题停在调度、拉镜像、进程还是网络 |
+| 保护数据 | 删除 API Pod 不影响记录；知道 PVC 仍不是备份 |
+| 交付可追溯 | 能把源码提交、镜像 tag/digest 和部署版本对应起来 |
+| 控制权限 | Secret 不进 Git，应用 ServiceAccount 只拿必需权限 |
+
+每项留一条命令输出或简短记录，敏感值和内部地址要脱敏。只看到 Pod Running、workflow 绿勾或 PVC Bound，都不足以单独证明业务可用、发布安全或数据可恢复。
+
+## 受控故障练习：让 Service 暂时没有后端
+
+仅在 kind-course 练习集群进行。先确认 context，再临时把课程 Service 的 selector 改成不存在的标签。API Pod 仍会运行，但 EndpointSlice 应不再有后端；恢复原清单后，EndpointSlice 回来，业务请求恢复。
+
+~~~powershell
+$context = kubectl config current-context
+if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在本地 kind-course 练习" }
+kubectl -n container-course get service course-api -o yaml
+kubectl -n container-course patch service course-api --type=merge -p '{"spec":{"selector":{"app":"missing-app"}}}'
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api
+kubectl -n container-course get pods -l app=course-api -o wide
+kubectl apply -f k8s/20-api.yaml
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o wide
+kubectl -n container-course rollout status deployment/course-api
+~~~
+
+错误期间 EndpointSlice 为空是预期结果；它证明问题在 Service 选择器，而不是 Pod 进程。清单恢复后应重新出现后端。若最后一步仍为空，对照 Service selector 与 API Pod labels，不要先删 Pod。
+
+## 为下一位值班同事写一页运行说明
+
+运行说明至少写清当前镜像摘要、namespace、关键 Service 名、数据库卷申请、健康检查地址、常见事件含义、凭证由谁轮换、发生数据损坏时找哪份备份以及恢复演练记录。明确标出 Docker Compose、kind 和生产集群的能力差异。
+
+写完后让没有参与实验的人照着复现一次。对方在哪一步需要猜环境、补上下文或担心误删，就把前置条件、预期输出和恢复方法写具体。教程的目标不是把命令堆齐，而是让操作能被另一位初学者安全重复。
+
 ## 生产里怎么用、怎么排障
 
 上线评审至少要回答：镜像如何追溯、配置和密钥如何轮换、失败如何止损、数据库如何备份恢复、容量不足谁处理、告警谁接、回滚会不会破坏数据。把演练结果写成运行手册并由另一位同事照着执行。kind 的成功只证明本地练习链路通，云负载均衡、真实存储和集群高可用仍需在目标环境单独验证。

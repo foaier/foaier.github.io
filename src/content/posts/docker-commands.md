@@ -65,6 +65,51 @@ docker image ls nginx:alpine
 ~~~
 
 
+
+## 命令按对象分组，比死记列表更好用
+
+| 你要查什么 | 常用命令 | 读它能回答什么 |
+|---|---|---|
+| 本机有哪些镜像 | docker image ls / inspect | 镜像名、tag、ID、架构和摘要 |
+| 容器是否运行 | docker ps -a / inspect | 当前状态、退出码、启动参数和挂载 |
+| 程序为什么退出 | docker logs | 标准输出、标准错误和应用自身报错 |
+| 容器里有什么进程 | docker top / stats | 进程列表和运行时资源快照 |
+| 容器内临时检查 | docker exec | 在现有容器里运行一条诊断命令 |
+| 容器之间怎么连 | docker network inspect | 网络成员、地址和网关 |
+| 数据保存在何处 | docker volume inspect | 卷的名称和 Engine 维护的挂载位置 |
+
+inspect 展示的是 Engine 保存的对象配置，logs 是程序输出，stats 是运行时采样，三者不是互相替代的。容器已经退出时，exec 不能进入它，但 logs、inspect 仍可以用来找原因。
+
+## 用一条真实排查链代替盲目重启
+
+假设 web 页面打不开，先按状态、日志、端口、健康检查的顺序收集证据。下面先创建一只专用实验容器；没有诊断完之前不要删除，否则退出原因和日志都可能不好复现。
+
+~~~powershell
+docker run -d --name command-lab -p 127.0.0.1:8088:80 nginx:alpine
+docker ps --filter name=command-lab
+docker logs --tail 20 command-lab
+docker inspect command-lab --format 'status={{.State.Status}} exit={{.State.ExitCode}}'
+docker port command-lab
+docker stats --no-stream command-lab
+docker exec command-lab nginx -t
+docker rm -f command-lab
+~~~
+
+预期容器状态是 running，端口映射为本机 8088 到容器 80，nginx -t 返回配置测试成功。浏览器访问 localhost:8088 可以验证请求路径。最后一行只清理本节创建的 command-lab；不要把清理命令改成无过滤的全局删除。
+
+## 清理命令要先看影响范围
+
+docker rm 删除容器实例，docker image rm 删除本地镜像，docker volume rm 删除独立数据卷；它们处理的对象不同。prune 命令会按规则清理一批对象，正式机器上先用 ls、inspect 和过滤条件确认目标。带有 -v 的 Compose down 会清理项目数据卷，删之前要确认是否需要保留或备份。
+
+~~~powershell
+docker ps -a --filter label=course=cleanup
+docker image ls
+docker volume ls
+docker system df
+~~~
+
+给临时容器添加稳定的 label，然后按 label 精确清理，比按名字猜或直接全局 prune 更安全。不要把命令执行成功当成数据已备份；删除前需要先有可验证的恢复副本。
+
 ## 生产里怎么用、怎么排障
 
 生产清理通常要设保留策略：旧镜像按版本和回滚窗口回收，日志按大小和时间轮转，卷必须经数据负责人确认。--volumes 会扩大清理范围，使用前逐个检查卷归属和备份状态。脚本应输出将删除的对象、先 dry-run 或按标签选择，并留审计记录；不要在故障时靠一条范围很大的命令碰运气。

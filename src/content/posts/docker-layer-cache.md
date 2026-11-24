@@ -61,6 +61,43 @@ docker image rm container-course-api:cache-check
 ~~~
 
 
+
+## 缓存命中的依据是输入，不是“上次构建成功”
+
+BuildKit 会根据某条指令、其依赖文件和前序层的输入判断能否复用结果。COPY 的文件内容变化会让该层及后续层重建；较早的依赖安装层一旦失效，后面的层也通常不能沿用。缓存解决重复计算，不是发布缓存，不应改变正确性。
+
+~~~text
+COPY *.csproj -> RUN dotnet restore -> COPY 源码 -> RUN dotnet publish
+     依赖定义稳定时，源码修改通常只让后两步重跑
+     若一开始 COPY . .，源码每次变化都可能让 restore 重跑
+~~~
+
+课程 Dockerfile 先复制 csproj 再 restore，就是为了把变化较少的依赖输入与频繁修改的源码分开。依赖定义更新时重新 restore 是正确行为；不要为了追求全命中而复用过期依赖结果。
+
+## 用构建日志验证缓存，而不是凭感觉
+
+第一次构建后再次执行相同构建，观察步骤旁是否标记 CACHED。再只改 Program.cs 中的业务代码并构建，restore 层仍应命中缓存。最后修改项目依赖文件再构建，restore 层应该重跑。
+
+~~~powershell
+docker buildx build --progress=plain --load -t cache-lab:local .
+docker buildx build --progress=plain --load -t cache-lab:local .
+~~~
+
+这两个命令要在 container-course 目录执行。不要同时改 Dockerfile、项目文件和源码，否则无法判断哪项输入让缓存失效。实验结束可保留镜像；它不会改数据库卷。
+
+## BuildKit 缓存挂载与普通镜像层不同
+
+对包管理器缓存，可以使用 BuildKit cache mount，把下载缓存留给构建器复用，但不把缓存目录放进最终镜像层。以 .NET 为例，可将 restore 改为：
+
+~~~~dockerfile
+RUN --mount=type=cache,target=/root/.nuget/packages \
+    dotnet restore src/ContainerCourse.Api/ContainerCourse.Api.csproj
+~~~~
+
+这是理解缓存挂载的示例；当前课程 Dockerfile 尚未采用它，改之前要保证构建阶段以 root 身份运行且路径与 SDK 镜像一致。多架构 builder、CI 临时 runner 和开发机的缓存彼此不一定共享，首次构建仍需要联网获取包。
+
+需要完全验证干净构建时用 --no-cache；需要拉取基础镜像的更新版本时加 --pull。前者不清理已有镜像，后者也不等于把 Dockerfile 中的浮动标签固定住。生产构建仍要锁定依赖并记录镜像 digest。
+
 ## 生产里怎么用、怎么排障
 
 生产流水线缓存要按项目和信任边界隔离，不能让不可信 PR 写入会被发布任务直接使用的缓存。缓存可丢、可重建，不能把它当唯一的依赖包或制品来源。依赖更新策略应有锁定版本与漏洞扫描，定期触发干净构建验证构建不依赖开发机残留；若缓存让结果不可解释，先用 no-cache 复现再定位输入。
