@@ -1,24 +1,21 @@
 ---
-title: "Pod 为什么 Pending？从资源请求到节点选择看调度"
-date: "2026-11-24"
-summary: "根据资源、标签、污点和拓扑约束，理解调度器为什么暂时放不下工作负载。"
-series: "Docker 与 Kubernetes"
+title: Pod 为什么 Pending？从资源请求到节点选择看调度
+date: '2026-11-24'
+summary: 根据资源、标签、污点和拓扑约束，理解调度器为什么暂时放不下工作负载。
+series: Docker 与 Kubernetes
 order: 34
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-security"]
-goals: ["检查 kind 节点标签，并为临时 Job 加一个可满足的 nodeSelector。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-security
+goals:
+  - 检查 kind 节点标签，并为临时 Job 加一个可满足的 nodeSelector。
 ---
 
 Pending 看起来像启动失败，其实 Pod 可能正等待调度。调度器要找满足资源和约束的节点；有时正在做决定，有时则是你写的条件压根无处满足。
-
-## 概念讲透：它负责什么，不负责什么
-
-调度器先过滤不满足条件的节点，再给候选节点打分。requests、节点标签、nodeSelector/亲和性、taint/toleration、卷拓扑和拓扑分布约束都会影响结果。Pod Pending 可能是请求的资源放不下，也可能是条件写得太严。容忍 taint 只表示允许落到该节点，不会主动把 Pod 送过去。
-
-## 运行过程拆解：从输入到结果
-
-调度器先过滤不可行节点：requests 放不下、缺少标签、污点未容忍、卷不能跨区等都会淘汰；剩下节点才按策略评分。亲和性和拓扑分散表达软硬偏好，nodeSelector 通常是硬约束。Pod Pending 时 Events 会给出失败过滤原因，调小 request 之前要确认真实内存/CPU需求，否则只是把调度问题换成运行期 OOM 或节流。
 
 ## 节点资源和约束怎样影响调度
 
@@ -37,26 +34,6 @@ kubectl -n container-course logs job/os-check
 kubectl -n container-course get pods -l job-name=os-check -o wide
 kubectl -n container-course delete job os-check
 ~~~
-
-## 怎么确认做对了
-
-Job Pod 带 selector 后落在带 Linux 标签的节点并打印 Linux。若没有匹配标签，Pod 会卡在 Pending，而不是进入容器执行失败。
-
-## 案例推演
-
-新副本一直 Pending，describe 事件提示没有节点满足约束。先看事件给出的资源不足、taint 或卷区域原因，再比较 Pod requests 和节点 allocatable，检查亲和性与标签是否拼错。不要立刻删掉约束；若节点容量不足，先扩节点或调整经压测验证的 request。
-
-## 留一个小练习
-
-在两个以上节点的本地集群试拓扑分布约束，分别比较硬性约束和偏好。硬约束设置过强会卡住所有副本；资源、可用区和副本数要一起设计。
-
-## 没跑通时先查什么
-
-先 describe Pod 看 FailedScheduling Events，再核对节点 allocatable、已请求总量、selector、污点和调度器。Pending 的容器尚未启动，通常没有可读日志。
-
-节点的 allocatable 不是机器整块硬件规格，系统进程和 kubelet 本身也要预留资源。调度器依据声明的 requests 放置 Pod，不会预先知道某个应用会突然多吃多少内存。因此 requests 的估算要结合观测，limit 则要结合压测。
-
-如果节点能接收 Pod 但磁盘或临时存储快满，也会遇到驱逐和启动问题。requests、limits 与节点污点要放在一次容量讨论里看，不能只研究 CPU。
 
 ## 选择器写在哪一层
 
@@ -93,8 +70,6 @@ $pendingPod = kubectl -n container-course get pods -l job-name=os-check -o jsonp
 kubectl -n container-course describe pod $pendingPod
 kubectl describe nodes
 ~~~
-
-
 
 ## 调度约束从“硬条件”到“偏好”有不同后果
 
@@ -138,10 +113,6 @@ IgnoredDuringExecution 表示节点标签后来变化时，调度器不会自动
 ## 单节点 kind 看不到真正的高可用分散
 
 课程 kind 默认只有一个节点，不能证明反亲和性或 topologySpread 能跨节点分散副本。已有 os-check Job 只能练标签选择；要练多故障域，先创建多节点 kind 集群并给节点设置不同的拓扑标签，再观察 Pod 分布。不要用强硬的 zone 约束去测试单节点集群，否则所有副本都可能 Pending。
-
-## 生产里怎么用、怎么排障
-
-把关键副本全调度到同一故障域会造成一次节点维护全站不可用。用 topology spread 或反亲和性分散副本，同时确认集群有足够容量容纳约束。污点常用于隔离系统节点或特殊硬件，随意给业务容忍会挤占关键资源；资源利用率和故障域要一起看。
 
 ## 参考资料
 

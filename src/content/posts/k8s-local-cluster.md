@@ -1,128 +1,98 @@
 ---
-title: "用 kind 搭一个本地集群：先在自己的电脑上把第一条链路跑通"
+title: "在自己电脑上搭 Kubernetes 练习环境：用 kind 建一个集群"
 date: "2026-11-24"
-summary: "安装 kind 和 kubectl，载入本地 API 镜像，再部署 API 与 PostgreSQL。"
+summary: "安装 kubectl 和 kind，在本机建集群并启动课程 API，所有命令只对练习集群操作。"
 series: "Docker 与 Kubernetes"
-order: 21
-tags: ["Kubernetes 入门","Docker","Kubernetes"]
+order: 20
+tags: ["Kubernetes 入门", "Docker"]
 level: "Kubernetes 入门"
-prerequisites: ["k8s-architecture"]
-goals: ["在 kind-course 上启动课程环境，并从本机访问就绪接口。"]
+prerequisites: ["k8s-why-runtime"]
+goals: ["在本机创建 kind 集群、部署课程示例并访问健康检查接口。"]
 ---
 
-刚学 Kubernetes，先不用租云服务器。kind 会把节点放在 Docker 容器里，一台电脑就能练部署、服务发现和重启恢复。它适合学习与 CI；把笔记本盖上就停的集群，当然不是生产高可用方案。
+接下来开始动手。我们用 kind 在 Docker 里创建一套本地 Kubernetes 练习环境，不需要租云服务器。请只在自己的电脑上照着做；后面的命令会部署课程 API 和数据库，不要把它们复制到公司或云端集群。
 
-## 概念讲透：它负责什么，不负责什么
+## 先装两个命令行工具
 
-kind 用容器模拟 Kubernetes 节点，适合练习 YAML、控制器、服务发现和发布流程；节点容器内部仍有自己的集群配置。它不是云集群的缩小复制：负载均衡、云盘、真实节点故障、生产证书和网络性能可能都不同。kubectl context 决定命令发往哪里，每次破坏性实验前都要确认当前上下文。
+Docker Desktop（或 Linux 上的 Docker Engine）必须已启动。Windows PowerShell 可以用 winget 安装 kind 和 kubectl；安装完成后关掉这个终端，再开一个新的终端，让系统重新读取命令路径。
 
-## 运行过程拆解：从输入到结果
+~~~powershell
+winget install -e --id Kubernetes.kind
+winget install -e --id Kubernetes.kubectl
+kind version
+kubectl version --client
+~~~
 
-本地链路由几份状态组成：kubectl context 选集群，kind 集群提供 API Server 和节点容器，镜像需出现在节点可访问的仓库或被手工加载，清单声明目标 namespace 与工作负载。哪一项对不上，都会出现“本机明明有镜像”或“apply 成功却找不到 Pod”。每次实验前后都核对 context、namespace、镜像名和实际节点。
+macOS 若已安装 Homebrew，可运行 `brew install kind kubectl`。Linux、没有 winget/Homebrew 的电脑，请按 kind 和 Kubernetes 官方安装页选择自己的系统与 CPU 架构。先确认 `kind version` 和 `kubectl version --client` 都能显示版本，再继续。
 
-## 准备工具与同一份课程源码
+## 创建集群前先确认 Docker 可用
 
-需要 Docker 已能运行 Linux 容器、kind、kubectl。Windows x64 可按 kind 官方 Quick Start 下载可执行文件并加入 PATH；macOS/Linux 选择对应架构安装。Docker Desktop 给足几 GB 可用内存，避免节点和数据库挤在一起。kubectl 与服务端版本按官方兼容范围配套，通常只支持相邻一个次版本。
+~~~powershell
+docker version
+kind get clusters
+kubectl config get-contexts
+~~~
 
-先[下载课程源码](/downloads/container-course.zip)并解压，所有相对路径都以解压后的 `container-course` 目录为准。终端示例使用 PowerShell；浏览器调用用 Invoke-RestMethod，macOS/Linux 可用 curl 访问相同地址。先停掉前面的 Compose 环境以腾出 8080：`docker compose down`，不加 -v。
-
-## 创建本地集群并部署服务
-
-创建名为 course 的独立集群，再切到 kind-course。不要朝已有云端或公司集群运行课程命令。下面先构建 API 镜像，载入节点，再创建 namespace、课程用 Secret、数据库和 API。Secret 命令只需第一次创建时执行。数据库先等 rollout 完成，方便新手缩小故障范围。
+`docker version` 应同时显示 Client 和 Server。如果列表里已经有名为 `course` 的 kind 集群，就跳过创建命令；不要重复创建，也不要删除不认识的集群。创建后切换到练习集群，并确认节点状态为 Ready：
 
 ~~~powershell
 kind create cluster --name course
 kubectl config use-context kind-course
 kubectl get nodes
+~~~
+
+若创建时提示集群已经存在，就执行 `kubectl config use-context kind-course` 和 `kubectl get nodes`，不必重建。后续破坏性操作前都运行 `kubectl config current-context`；结果必须是 `kind-course`。
+
+## 下载课程文件并启动 API 和数据库
+
+先[下载课程示例](/downloads/container-course.zip)并解压。用文件管理器打开 `container-course` 文件夹，在该文件夹打开终端。运行 `Get-ChildItem Dockerfile, compose.yaml, k8s`，应能看到这些文件；如果提示找不到文件，说明终端开错目录。
+
+Compose 如仍在占用本机 8080 端口，请在这个目录执行 `docker compose down`。这会停止课程容器，但不删除数据库卷；不要加 `-v`。接着构建 API 镜像，并把镜像复制到 kind 节点：kind 节点有自己的镜像存储，只在电脑上执行 docker build 还不够。
+
+~~~powershell
 docker build -t container-course-api:local .
 kind load docker-image container-course-api:local --name course
 kubectl apply -f k8s/00-namespace.yaml
 kubectl -n container-course create secret generic course-db --from-literal=password=course-local-only
-kubectl apply -f k8s/10-database.yaml
+~~~
+
+密码 `course-local-only` 只用于本地教学。若命令提示 Secret 已存在，说明之前创建过，直接继续；不要把真实密码写进命令或文章。kind 练习需要一个简单的本机存储插件，下一条安装 Rancher 的 local-path provisioner，等它启动后再部署数据库：
+
+~~~powershell
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.31/deploy/local-path-storage.yaml
+kubectl -n local-path-storage rollout status deployment/local-path-provisioner --timeout=120s
+kubectl get storageclass
+kubectl apply -k k8s
 kubectl -n container-course rollout status deployment/postgres --timeout=180s
-kubectl apply -f k8s/20-api.yaml
 kubectl -n container-course rollout status deployment/course-api --timeout=180s
+~~~
+
+`kubectl apply -k k8s` 会读取课程目录里的清单，创建 API、PostgreSQL 和它们需要的配置。命令最后显示 successfully rolled out 才算服务就绪；第一次下载镜像可能要等几分钟。
+
+## 从浏览器确认服务真的能用
+
+在当前终端启动本机转发，这条命令会一直运行。再打开一个新的终端窗口发送请求：
+
+~~~powershell
 kubectl -n container-course port-forward service/course-api 8080:80
 ~~~
 
-## 怎么确认做对了
-
-nodes 应是 Ready；数据库一个 Pod，API 两个 Pod，READY 列都完整。最后一条命令保持运行，另开终端请求 `Invoke-RestMethod http://localhost:8080/health/ready`，应见 ready 与 connected。port-forward 是本机调试通道，默认只绑定回环地址，不是正式对外入口。
-
-## 案例推演
-
-镜像在本机 docker images 能看到，kind Pod 仍报 ImagePullBackOff。宿主机 Docker 镜像存储与 kind 节点的镜像存储不是同一处；要用 kind load docker-image 把镜像送入目标集群，或者推到节点可访问的仓库。随后核对镜像名、tag、pull policy 和 context，避免去错误集群找问题。
-
-## 留一个小练习
-
-另开终端执行 `kubectl -n container-course get pods -o wide`，看看 Pod 分配到了哪台节点。在浏览器访问根路径的 JSON，记下 host。两个 API 副本共用数据库，但此刻 port-forward 不适合用来演示每次请求均匀分发。
-
-## 没跑通时先查什么
-
-ImagePullBackOff 先查本地镜像是否准确命名并 load 到 course；kind 节点不会自动共享宿主机镜像库。PVC Pending 查 StorageClass。8080 被占用时停 Compose 或改为 `8081:80`。重建集群会丢掉该集群状态，没做完课程先别执行 delete cluster。
-
-## 确认 kind 集群建好并连接到 API Server
-
-集群创建后不要再执行第二遍 create。先确认 kind 管理的集群名称，再查 API Server 和节点；如果输出里没有 course 或当前 context 不对，先切换到 kind-course 再继续后面的章节。
-
 ~~~powershell
-kind get clusters
-kubectl cluster-info
-kubectl get nodes -o wide
+Invoke-RestMethod http://localhost:8080/health/ready
 ~~~
 
+正常应返回表示 API 与数据库已连接的 JSON。若 8080 被占用，把转发命令改为 `8081:80`，然后访问 `http://localhost:8081/health/ready`。结束实验时在运行 port-forward 的终端按 Ctrl+C；先保留集群，后续章节要继续使用。整个课程最后再学安全清理。
 
-## kind 和真实集群有三个重要差异
+## 卡住时先看这一层
 
-kind 把节点作为 Docker 容器运行，集群 API 与 Kubernetes 控制循环都是真的；但节点资源来自一台电脑，kind 不会自动给你云负载均衡器、云盘、企业证书或生产网络隔离。电脑进入睡眠时，集群自然也会停止响应。实验通过只能证明本地配置符合这次练习，不代表线上容量与容灾成立。
-
-镜像是另一个常见边界：docker build 产物保存在宿主机 Engine，kind 节点有自己的镜像存储。没有 kind load 或可访问仓库时，Pod 会尝试从远端拉取同名 tag，常见结果是 ImagePullBackOff。
-
-## 多节点实验：看调度器如何选择 Node
-
-完成单节点课程后，可额外创建一套两 worker 的集群。保存下面内容为 kind-multi.yaml；创建前确认本机有足够内存。这个拓展集群使用单独名称，不影响课程集群 kind-course。
-
-~~~~yaml
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-  - role: worker
-  - role: worker
-~~~~
-
-~~~powershell
-kind create cluster --name topology --config .\kind-multi.yaml
-kubectl config use-context kind-topology
-kubectl get nodes -o wide
-kubectl config use-context kind-course
-~~~
-
-输出应有一个 control-plane 和两个 worker，节点变为 Ready 后即可观察课程 Deployment 的 Pod 分布。默认情况下调度器可能将副本放在同一节点；要分散副本需在 workload 中声明 topology spread 或亲和性。完成后可只删除额外集群：
-
-~~~powershell
-kubectl config current-context
-kind delete cluster --name topology
-~~~
-
-删除前确认当前集群名是 kind-course 或 kind-topology，并确认要删的确实是本节额外创建的 topology。不要把 delete 命令改成课程集群名称。
-
-## 每次动手前的集群身份检查
-
-kind 的名字与 kubectl context 通常分别是 course 和 kind-course；这两个名字不同。运行删除、修改副本或清理 namespace 的命令前先看 current-context。若上下文指向公司或云端集群，停止本练习，不要试着“反正只改一个 Pod”。
-
-~~~powershell
-kind get clusters
-kubectl config get-contexts
-kubectl config current-context
-kubectl -n container-course get pods
-~~~
-
-## 生产里怎么用、怎么排障
-
-本地实验容易把公网集群的资源误删，建议使用专用 namespace、清晰 context 名和脚本里的显式 namespace。kind 节点共享本机 CPU 和内存，Pending 可能是电脑资源不足，不代表生产集群容量配置正确。云上验证还要单独检查云负载均衡、CSI 存储、证书、权限和节点网络。
+- `Cannot connect to Docker daemon`：先启动 Docker Desktop/Engine，再试 `docker version`。
+- `kind load` 找不到镜像：确认刚才的 build 成功，并且镜像名完整是 `container-course-api:local`。
+- Pod 出现 `ImagePullBackOff`：检查 kind context、镜像名称，再运行一次 `kind load docker-image ... --name course`。
+- PVC 一直 Pending：检查 `local-path-storage` 部署是否 Ready，以及 `kubectl get storageclass` 是否有 `local-path`。
+- API 没 Ready：先看 `kubectl -n container-course get pods` 和 `kubectl -n container-course logs deployment/course-api`，确认数据库已 Ready。
 
 ## 参考资料
 
-- [kind Quick Start](https://kind.sigs.k8s.io/docs/user/quick-start/)
+- [kind 快速开始](https://kind.sigs.k8s.io/docs/user/quick-start/)
 - [安装 kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [local-path-provisioner](https://github.com/rancher/local-path-provisioner)

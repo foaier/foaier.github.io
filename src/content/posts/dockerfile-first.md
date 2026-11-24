@@ -1,24 +1,21 @@
 ---
-title: "写第一个 Dockerfile：把 .NET 小服务做成镜像"
-date: "2026-11-24"
-summary: "用 Dockerfile 描述 .NET API 如何编译、发布和启动。"
-series: "Docker 与 Kubernetes"
+title: 写第一个 Dockerfile：把 .NET 小服务做成镜像
+date: '2026-11-24'
+summary: 用 Dockerfile 描述 .NET API 如何编译、发布和启动。
+series: Docker 与 Kubernetes
 order: 6
-tags: ["Docker 基础","Docker","Kubernetes"]
-level: "Docker 基础"
-prerequisites: ["docker-debug"]
-goals: ["构建并运行课程 API 镜像，区分 build 时和 run 时执行的事情。"]
+tags:
+  - Docker 基础
+  - Docker
+  - Kubernetes
+level: Docker 基础
+prerequisites:
+  - docker-debug
+goals:
+  - 构建并运行课程 API 镜像，区分 build 时和 run 时执行的事情。
 ---
 
 `docker run` 能启动别人的镜像，但工作中总有一天要把自己的程序装进去。Dockerfile 就是一份按顺序执行的构建说明：选基础镜像、把文件复制进去、执行构建命令、声明启动方式。它不是在容器运行时临时执行的脚本，而是构建镜像的配方。
-
-## 概念讲透：它负责什么，不负责什么
-
-Dockerfile 的指令发生在不同阶段：FROM 选基础镜像，COPY 把构建上下文里的文件带入镜像，RUN 在构建时执行，ENV 和 EXPOSE 记录运行配置，ENTRYPOINT/CMD 定义容器启动进程。RUN dotnet publish 会在构建时结束；ENTRYPOINT dotnet ... 才会在容器启动时运行。写 Dockerfile 的目标是让构建步骤可重复、可审查。
-
-## 运行过程拆解：从输入到结果
-
-构建时 RUN 的结果进入镜像，ENTRYPOINT/CMD 描述运行时容器要执行的主进程；COPY 只能读取构建上下文中的文件。多阶段构建是先在 SDK 环境生成 publish 目录，再从该目录挑运行所需文件复制到 Runtime 阶段。理解每条指令的时间点，才能解释为什么 build 成功却启动失败，或为什么本机文件没有进镜像。
 
 ## 先拿到课程源码
 
@@ -34,22 +31,6 @@ Dockerfile 的指令发生在不同阶段：FROM 选基础镜像，COPY 把构�
 docker build -t container-course-api:local .
 docker run --rm --name course-api -p 127.0.0.1:8080:8080 container-course-api:local
 ~~~
-
-## 怎么确认做对了
-
-终端显示 Kestrel 正在监听 8080。另开终端访问 `/`，应得到带 `message` 和主机名的 JSON；访问 `/health/live` 应得到 `alive`。由于还没有启动数据库，`/health/ready` 暂时会返回 503，这是正确的区分。
-
-## 案例推演
-
-镜像构建成功，容器一启动便报找不到应用文件。对照最终阶段的工作目录、COPY 来源和 ENTRYPOINT 指向，确认 publish 输出确实复制到了运行镜像。多阶段构建中 build 阶段存在的文件不会自动出现在 runtime 阶段，必须通过 COPY --from 明确带过去。然后再检查目标框架和运行时版本是否匹配。
-
-## 留一个小练习
-
-把映射的宿主机端口换成 8081，访问新端口。接着在 Dockerfile 的运行阶段暂时改掉 DLL 名，再重新 build；容器会启动失败。恢复后再做一次，感受镜像构建错误与容器运行错误是两件事。
-
-## 没跑通时先查什么
-
-build 失败先读第一条错误，不要只看最后的 exit code。找不到项目文件，多半是 Dockerfile 路径或 build context 不对；容器马上退出看 `docker ps -a` 和 logs。出现本机已有程序占用 8080，换宿主机左侧端口，容器内 8080 不用改。
 
 ## 把 Dockerfile 一行一行对上实际工作
 
@@ -84,8 +65,6 @@ USER 使用 .NET 官方 Linux 镜像提供的非 root UID。EXPOSE 只是端口�
 docker image inspect container-course-api:local --format 'ID={{.Id}} size={{.Size}}'
 docker image ls container-course-api
 ~~~
-
-
 
 ## Dockerfile 指令分别改变什么
 
@@ -129,10 +108,6 @@ docker run --rm --entrypoint dotnet container-course-api:lesson --info
 ## 安全和可复现的几个检查点
 
 基础镜像优先选受维护的官方镜像，并按团队更新策略固定版本；高保证场景再记录 digest。不要把私钥、连接密码写进 Dockerfile 的 ARG 或 ENV，也不要将宿主机路径假定为固定值。构建完成后检查最终镜像的 USER、入口、端口元数据和包含文件，确认运行阶段不带 SDK、源码仓库和构建凭据。
-
-## 生产里怎么用、怎么排障
-
-线上构建要避免把开发环境文件、测试密钥和完整 SDK 混进运行镜像。用多阶段构建缩小运行时内容，设置非 root 用户，并验证文件权限、证书和临时目录需求。基础镜像固定到受支持的版本并定期重建获取安全补丁；只追求镜像最小可能导致缺少诊断工具和 CA 证书，得先测试应用真正需要什么。
 
 ## 参考资料
 

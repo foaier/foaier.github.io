@@ -1,24 +1,21 @@
 ---
-title: "清单多了怎么维护？Helm 和 Kustomize 按问题选"
-date: "2026-11-24"
-summary: "比较 Chart 模板与环境覆盖，并构造一份可重复的 kind customization。"
-series: "Docker 与 Kubernetes"
+title: 清单多了怎么维护？Helm 和 Kustomize 按问题选
+date: '2026-11-24'
+summary: 比较 Chart 模板与环境覆盖，并构造一份可重复的 kind customization。
+series: Docker 与 Kubernetes
 order: 39
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-autoscaling"]
-goals: ["用 Kustomize 构建课程本地清单，说明 Helm 与 Kustomize 的差异。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-autoscaling
+goals:
+  - 用 Kustomize 构建课程本地清单，说明 Helm 与 Kustomize 的差异。
 ---
 
 开发、测试、生产三份 YAML 手改后，常常一份补了 readiness，另外两份忘了。工具想解决的是重复和环境差异，不是把 YAML 藏进更难懂的语法。
-
-## 概念讲透：它负责什么，不负责什么
-
-Kustomize 通过 base 与 overlay 对现有 YAML 做结构化补丁，通常不需要模板语言；Helm 用 Chart 模板和 values 渲染一组资源，适合可配置的软件打包与版本发布。两者都要先看最终生成的清单。工具不会自动替你理解配置风险，也不会保证不同环境的差异合理。
-
-## 运行过程拆解：从输入到结果
-
-Helm 先按 Chart 模板与 values 渲染清单，release 还带有版本和升级历史；Kustomize 把 base、patch、namePrefix 和环境覆盖合并为一份清单。两者输出都能继续经过 API 校验。对比时问谁维护模板、如何测试升级、环境差异如何审查，而不只看哪种语法更短。先渲染并 diff，能提前发现错误副本数、镜像或 RBAC。
 
 ## 重复配置和环境差异怎么管理
 
@@ -43,41 +40,6 @@ images:
     newTag: local
 ~~~
 
-## 怎么确认做对了
-
-`kubectl kustomize k8s` 展开为可读对象；应用后 API 与数据库照常工作。Secret 密码没有出现在最终 YAML。
-
-## 案例推演
-
-测试环境和生产环境手工维护两份 YAML，修复只改了测试那份。把共同部分放进 base，用 overlay 明确副本、域名和资源差异；运行 kustomize build 并检查 diff，再提交部署。若安装第三方软件且需要参数化和升级生命周期，评估 Helm Chart；不要同时引入两层模板只为替换一个端口。
-
-## 留一个小练习
-
-在文件末尾临时追加下面这段 patch，再运行 `kubectl kustomize k8s`。输出里 API replicas 应变为 1，数据库不变。这个实验只预览、不 apply；看完移除 patch，再次展开确认恢复为 2。
-
-~~~yaml
-patches:
-  - target:
-      group: apps
-      version: v1
-      kind: Deployment
-      name: course-api
-    patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-~~~
-
-## 没跑通时先查什么
-
-找不到资源先核对相对路径。Helm 卸载会影响它管理的对象，卸载前查 PVC 保留策略；values 更新也不表示数据库卷可重建。
-
-文件保存位置：`examples/container-course/k8s/kustomization.yaml`。
-
-先运行构建命令审阅最终清单，能提前发现标签覆盖、namespace 与镜像名称错误。Helm Chart 来源和版本也属于软件供应链，需要评估维护者、values 默认权限与升级记录；装第三方监控栈前，先在空集群检查它会创建哪些高权限对象。
-
-values 文件里可能也有连接口令、镜像仓库 token 等敏感字段，不要因为 Helm 是模板工具就默认这些值安全。发布流水线应限制 values 的来源、存储和输出日志，渲染结果分享前先查一遍明文。
-
 ## 先渲染最终 YAML，再看实际差异
 
 第一条只打印合并后的清单；第二条对比当前集群并标出待改字段；第三条让 API Server 校验但不保存。发现错误副本数、镜像或明文秘密时先停下来修。Helm 可用 helm template 和 helm diff 做类似的发布前检查。
@@ -87,8 +49,6 @@ kubectl kustomize k8s
 kubectl diff -k k8s
 kubectl apply --dry-run=server -k k8s
 ~~~
-
-
 
 ## 用 Helm 建立本地 Chart 并看懂 Release
 
@@ -134,10 +94,6 @@ kubectl -n helm-lab port-forward service/helm-lab 8091:8080
 Chart version 表示模板包版本，appVersion 是 Chart 元数据中的应用版本说明，image.tag/digest 才决定容器运行的镜像。三者可以不同。生产发布应固定 Chart 版本和镜像内容，并审阅升级渲染差异；只改 tag 不一定触发新 Pod，前提是模板最终字段确实发生变化。
 
 Kustomize 更适合对普通 YAML 做环境差异覆盖；Helm 适合发布带参数和版本历史的应用包。二者可串用，但必须明确只有一套系统负责目标资源，否则 Helm 与 GitOps/Kustomize 可能互相覆盖。
-
-## 生产里怎么用、怎么排障
-
-模板变化可能一次渲染出误删、权限过宽或大量滚动更新。CI 中对渲染结果做 schema、安全和策略检查，部署前审阅差异，记录 Chart/清单版本。Secret 不应因模板化就进入明文 Git；环境覆盖要尽量少，避免测试与生产逐渐变成无法比较的两套系统。
 
 ## 参考资料
 

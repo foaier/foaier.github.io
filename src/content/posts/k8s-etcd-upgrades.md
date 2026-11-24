@@ -1,24 +1,21 @@
 ---
-title: "集群升级和 etcd 备份：控制面维护前先想能不能恢复"
-date: "2026-11-24"
-summary: "从 etcd 角色、版本偏差和节点排空讲清集群维护的前后条件。"
-series: "Docker 与 Kubernetes"
+title: 集群升级和 etcd 备份：控制面维护前先想能不能恢复
+date: '2026-11-24'
+summary: 从 etcd 角色、版本偏差和节点排空讲清集群维护的前后条件。
+series: Docker 与 Kubernetes
 order: 40
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-helm-kustomize"]
-goals: ["检查集群版本信息并形成升级检查单，分清 etcd 与业务数据库备份。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-helm-kustomize
+goals:
+  - 检查集群版本信息并形成升级检查单，分清 etcd 与业务数据库备份。
 ---
 
 升级 Kubernetes 不是把一个版本号改掉这么简单。控制面组件、节点、客户端和插件各有兼容范围；etcd 快照又关乎集群 API 状态。先确认谁托管、谁备份，再排维护窗口。
-
-## 概念讲透：它负责什么，不负责什么
-
-etcd 是控制面的分布式键值存储，保存 Kubernetes API 对象状态，不保存 PostgreSQL 业务记录。升级 Kubernetes 要遵循版本偏差与支持路径，并按控制面、节点和插件的兼容关系逐步推进。PDB 限制自愿驱逐时可中断的副本数，但无法防止停电、硬件故障或业务本身崩溃。
-
-## 运行过程拆解：从输入到结果
-
-升级过程必须让可用性和版本兼容一起推进：先检查弃用 API 与插件，再按支持路径升级控制面和节点，每个节点维护后验证恢复，最后观察业务请求。etcd 快照恢复的是 API 对象状态，业务数据库需独立备份；PDB 只能限制主动驱逐。维护前要知道每一步失败后能回到哪个版本、哪个快照，以及恢复期间谁保持服务。
 
 ## 控制面和业务数据各自需要恢复方案
 
@@ -36,22 +33,6 @@ kubectl get nodes -o wide
 kind version
 kubectl get pods -A -o wide
 ~~~
-
-## 怎么确认做对了
-
-节点版本、镜像和系统信息可以记录，课程集群状态没有变化。`kubectl drain` 和删除 etcd 数据目录不是检查命令；还原快照前也要确认它对应正确的成员集群。
-
-## 案例推演
-
-维护窗口里要升级集群，团队发现 etcd 备份从未做过恢复验证。先暂停升级，记录当前控制面与节点版本，确认目标版本路径、插件兼容、容量和维护窗口；在测试环境从备份恢复控制面状态并演练节点升级。另行备份 PostgreSQL，两类备份保护的是完全不同的数据。
-
-## 留一个小练习
-
-写升级检查单：目标版本跨度、API 弃用、插件兼容、etcd 和 PostgreSQL 分别备份、还原测试、PDB、节点逐个验证、回滚判据和负责人。任何一项没有实测步骤，“有备份”都不算恢复能力。
-
-## 没跑通时先查什么
-
-升级后 NotReady 要检查 kubelet、容器运行时、CNI/CSI、证书、CoreDNS 和入口兼容。etcd 恢复出错影响整个控制面，生产命令必须匹配具体拓扑、endpoint 和证书，不能复制别的集群路径。
 
 ## 为什么三台控制面也不能同时重启两台
 
@@ -92,7 +73,6 @@ kubectl get pods -A --field-selector=status.phase=Pending -o wide
 kubectl -n kube-system get pods -o wide
 ~~~
 
-
 ## 快照成功后至少还要检查什么
 
 etcd 备份要和集群 ID、版本、成员拓扑、证书与恢复说明一起保存。快照文件存在且大小合理，只能证明写出了文件；离线检查快照状态，再在隔离环境恢复并验证关键 API 对象，才说明恢复路径大致可行。还原不是在运行中的集群上覆盖一个文件，必须遵循对应 etcd 与 Kubernetes 的官方灾备步骤。
@@ -117,10 +97,6 @@ etcdutl snapshot status /secure-backup/etcd-YYYY-MM-DD-HHMM.db --write-out=table
 升级前确认版本偏差和插件兼容，确保剩余节点能承载当前 requests。维护一个节点时，先 cordon 阻止新 Pod 调度，再按 PDB 和 DaemonSet 情况 drain，完成节点升级并验证 kubelet、CNI、CSI 和业务请求后再继续下一台。单节点 kind 不适合练 drain，因为它没有可承接 Pod 的备用节点。
 
 PDB 保护 Eviction API 路径中的自愿中断，不是机器故障保险；节点数量不足、PDB 配成 minAvailable 等于当前副本数时，drain 可能一直被阻止。不要使用 --disable-eviction 绕过保护，除非经过变更审批并明确承受中断。
-
-## 生产里怎么用、怎么排障
-
-升级前检查 API 弃用、PDB、剩余容量、证书、存储插件和回滚边界；升级后核对节点、核心 Pod、工作负载、入口和真实请求。etcd 备份应加密、异地保存并限制读取权限，恢复步骤要有时间目标。控制面故障可能无法靠 kubectl 自救，需要云厂商或集群管理员的带外恢复通道。
 
 ## 参考资料
 

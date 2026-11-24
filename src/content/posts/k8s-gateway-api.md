@@ -1,24 +1,21 @@
 ---
-title: "集群里的服务怎么给用户访问？从 Service 到 Gateway API"
-date: "2026-11-24"
-summary: "厘清 ClusterIP、负载均衡器与 HTTP 路由，并先检查集群有没有 Gateway 实现。"
-series: "Docker 与 Kubernetes"
+title: 集群里的服务怎么给用户访问？从 Service 到 Gateway API
+date: '2026-11-24'
+summary: 厘清 ClusterIP、负载均衡器与 HTTP 路由，并先检查集群有没有 Gateway 实现。
+series: Docker 与 Kubernetes
 order: 31
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-workloads"]
-goals: ["分辨内部服务和集群入口，并说明 Gateway API 资源为什么不能单独处理流量。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-workloads
+goals:
+  - 分辨内部服务和集群入口，并说明 Gateway API 资源为什么不能单独处理流量。
 ---
 
 在 kind 里 port-forward 很方便，但它是你电脑与某个服务间的临时调试通道，不是网站正式上线的方法。对外提供 HTTP，通常还需要入口实现、DNS、证书和可达的网络。
-
-## 概念讲透：它负责什么，不负责什么
-
-Service 解决集群内部稳定寻址，Gateway API 把集群入口、监听器和 HTTP 路由拆成不同对象，由 Gateway Controller 实际配置代理或负载均衡器。安装 CRD 和写 HTTPRoute 不会凭空产生入口实现；GatewayClass、实现控制器、地址分配、DNS 和 TLS 证书都要齐备。
-
-## 运行过程拆解：从输入到结果
-
-控制器先观察 GatewayClass，再根据 Gateway listener 创建入口实现；HTTPRoute 通过 parentRefs 请求挂到 listener，并受主机名、协议、端口和引用策略约束。控制器把被接受的规则转成数据面配置，返回 status conditions。因而检查顺序应从实现和 listener 到路由接受状态、入口地址、DNS/TLS、后端 EndpointSlice，而不是看到 YAML 存在就认为流量已通。
 
 ## 从内部 Service 到外部入口
 
@@ -36,24 +33,6 @@ kubectl get gatewayclass
 kubectl get gateways.gateway.networking.k8s.io -A
 kubectl get ingressclass,ingress -A
 ~~~
-
-## 怎么确认做对了
-
-kind 通常没有 GatewayClass，或显示 No resources found。这说明没有安装入口 controller，不代表 API 服务本身坏了。如果 Gateway 的 Programmed 状态为空，检查 Conditions 和所用 controller 文档。
-
-## 案例推演
-
-HTTPRoute 已成功 apply，浏览器仍打不开站点。先看 GatewayClass 是否有控制器接管，再看 Gateway 和 Route 的 status conditions、listener 主机名与父子引用授权，然后检查入口 IP/DNS、证书和后端 Service。对象存在不代表控制器接受路由，更不代表外网已经能到达。
-
-## 留一个小练习
-
-画出请求经过 DNS、入口负载均衡器、Gateway/HTTPRoute、Service、就绪 API Pod 的路径。要实际练习部署，先选择支持 Gateway API 的实现，并按它的官方教程安装到明确的本地集群。
-
-## 没跑通时先查什么
-
-外部域名打不开时，先用内部 Service 测试，再逐层查 Route 的 Accepted/ResolvedRefs、Gateway Programmed、Service endpoints、DNS 与防火墙。创建 HTTPRoute 不会替你购买证书或域名。
-
-TLS 可以在入口终止，也可能通过 Gateway 与后端间再加密；具体能力取决于控制器和证书提供方式。上线时要画出证书由谁更新、过期前谁收到告警、域名切换如何验证，而不是把“配置了 HTTPS”当作一次性工作。
 
 ## 把一条路由真正读懂
 
@@ -105,10 +84,6 @@ kubectl explain httproute.spec --api-version=gateway.networking.k8s.io/v1
 kubectl -n container-course get gateway,httproute -o wide
 kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o wide
 ~~~
-
-## 生产里怎么用、怎么排障
-
-生产入口要明确 TLS 在哪里终止、证书如何轮换、哪些团队能改公共路由、限流和超时由谁负责。控制器升级可能改变路由行为，需做兼容验证和灰度。公网入口要配防火墙、WAF 或云安全组；服务内部认证不能因为经过网关就省略。
 
 ## 参考资料
 

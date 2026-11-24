@@ -1,24 +1,21 @@
 ---
-title: "副本能自动调吗？HPA 也得先看 Metrics API 和容量上限"
-date: "2026-11-24"
-summary: "理解 HPA 的指标依赖，以及 Pod 扩容与节点扩容的区别。"
-series: "Docker 与 Kubernetes"
+title: 副本能自动调吗？HPA 也得先看 Metrics API 和容量上限
+date: '2026-11-24'
+summary: 理解 HPA 的指标依赖，以及 Pod 扩容与节点扩容的区别。
+series: Docker 与 Kubernetes
 order: 38
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-observability"]
-goals: ["检查 Metrics API 与 HPA，并设计有数据库容量约束的扩缩容策略。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-observability
+goals:
+  - 检查 Metrics API 与 HPA，并设计有数据库容量约束的扩缩容策略。
 ---
 
 给 API 多加几个副本不难，难的是高峰时及时扩、低峰时平稳收回，而且新副本能处理更多工作。HPA 是起点，不是让集群无成本无限增长的开关。
-
-## 概念讲透：它负责什么，不负责什么
-
-HPA 根据 CPU、内存或自定义指标调节工作负载副本；CPU 利用率通常相对 request 计算，所以没有合理 request 就难以解释目标百分比。扩副本只能应对应用横向可扩展且下游有余量的压力；节点不足还需要集群自动扩容，队列消费可考虑基于队列长度的指标。
-
-## 运行过程拆解：从输入到结果
-
-HPA 周期性读指标，与目标比较后更新 Deployment 的 scale 子资源，控制器随后按新副本数创建 Pod。Pod 若 Pending，说明调度容量或约束没解决；Pod 已多但数据库耗尽，说明扩容目标超过下游能力。扩缩策略还要考虑未就绪副本、采样延迟和稳定窗口，用端到端请求延迟验证收益，而不只看副本数量变化。
 
 ## 扩副本之前先弄清指标和容量
 
@@ -36,24 +33,6 @@ kubectl top nodes
 kubectl -n container-course get hpa
 kubectl -n container-course get deployment course-api -o jsonpath="{.spec.template.spec.containers[0].resources.requests}"
 ~~~
-
-## 怎么确认做对了
-
-有 Metrics Server 时 top 与 HPA 才能获取资源信号；没有时 top 报 Metrics API 未注册，HPA 的 current 指标会是 unknown。Deployment 的 requests 和限制仍有效，但自动扩容并未因此开启。
-
-## 案例推演
-
-CPU 已高，HPA 仍显示 unknown。先检查 Metrics API 和 metrics-server，再核对 Pod 是否声明 CPU request、HPA 的 scaleTargetRef 和指标名称。指标正常后制造受控负载，观察副本数和扩容延迟；同时确认数据库连接数上限，避免 API 扩容把数据库压垮。
-
-## 留一个小练习
-
-设计 API 的扩缩容范围：最小副本数怎样覆盖节点故障，最大副本数对数据库连接意味着什么，指标目标来自什么压测数据，缩容要留多少缓冲。每个数字都需要容量和成本依据。
-
-## 没跑通时先查什么
-
-HPA 不动，先看 Conditions、指标 API、requests 和 Events。副本增加后仍慢，检查数据库连接池、锁、CPU throttling 和新副本是否真的接到流量。HPA 不会自动增加节点。
-
-自动扩容本身也有延迟：指标采样、控制器决策、调度、镜像拉取和应用预热都会花时间。高峰到来前需要合适的容量余量；队列型系统还应监控积压和消费速度，不能只盯 CPU 百分比。
 
 ## 指标可用之后，跑一次真正的扩缩容
 
@@ -95,10 +74,6 @@ HPA 根据指标周期性地调整 Deployment 副本，不会立即响应每个�
 kubectl -n container-course get hpa course-api --watch
 kubectl -n container-course get pods -l app=course-api --watch
 ~~~
-
-## 生产里怎么用、怎么排障
-
-HPA 有采样和稳定窗口，尖峰来得太快时扩容可能赶不上；扩缩容过于激进又会造成抖动。配置行为策略、最小副本和最大副本，按业务延迟与队列积压调优。负载生成实验只在本地或授权环境执行，并监控下游容量；副本变多不等于吞吐必然变大。
 
 ## 参考资料
 

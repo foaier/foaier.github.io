@@ -1,24 +1,21 @@
 ---
-title: "从 Pod 连不上开始：集群网络、CoreDNS 和 NetworkPolicy"
-date: "2026-11-24"
-summary: "分开检查 Pod 网络、Service DNS、入口路由和网络策略。"
-series: "Docker 与 Kubernetes"
+title: 从 Pod 连不上开始：集群网络、CoreDNS 和 NetworkPolicy
+date: '2026-11-24'
+summary: 分开检查 Pod 网络、Service DNS、入口路由和网络策略。
+series: Docker 与 Kubernetes
 order: 35
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-scheduling"]
-goals: ["查询集群里的 Service DNS，并说明 NetworkPolicy 需要 CNI 支持。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-scheduling
+goals:
+  - 查询集群里的 Service DNS，并说明 NetworkPolicy 需要 CNI 支持。
 ---
 
 “两个服务连不上”经常被一句网络故障带过。究竟是程序没监听、Service 没后端、DNS 查不到，还是策略拦了？先按流量路径拆开，比乱加一条 NetworkPolicy 更快。
-
-## 概念讲透：它负责什么，不负责什么
-
-Kubernetes 网络通常由 CNI 给 Pod 配地址并实现跨节点连通，Service 提供稳定虚拟地址，CoreDNS 负责服务名解析，NetworkPolicy 描述允许哪些 Pod/方向流量。策略是否真正执行取决于网络插件。DNS 解析成功只说明名字找到地址，不保证路由、端口监听、TLS、应用认证都正常。
-
-## 运行过程拆解：从输入到结果
-
-一次集群内请求可以按路径拆分：调用方解析 Service DNS，得到 ClusterIP；Service 转发到就绪 EndpointSlice；CNI 负责 Pod 间网络；NetworkPolicy 可能允许或丢弃流量；最后应用完成 TLS、认证和协议处理。每层的成功信号不同。排查时从 name resolution 到 TCP，再到 HTTP 状态逐步测试，不要把“能 ping”当成应用端口正常。
 
 ## 名字解析与实际通信各走哪一层
 
@@ -35,26 +32,6 @@ kubectl -n container-course run dns-check --rm -i --restart=Never --image=busybo
 kubectl -n kube-system get pods -l k8s-app=kube-dns
 kubectl -n container-course get service,endpointslice
 ~~~
-
-## 怎么确认做对了
-
-DNS 返回 course-api 的 ClusterIP，CoreDNS Pod 正常，EndpointSlice 有后端。nslookup 成功只验证解析，不能证明 HTTP 端口或数据库请求正常。
-
-## 案例推演
-
-API 能解析 postgres，但 TCP 连接超时。先用同 namespace 的诊断 Pod 解析完整服务名，再测试 5432 端口；同时看 Service 的 EndpointSlice、数据库监听、NetworkPolicy 与 CNI 状态。若 DNS 失败查 CoreDNS 和搜索域；若能连上却认证失败，问题在账号或连接配置，不是网络。
-
-## 留一个小练习
-
-画出 API 到 postgres 的 DNS 与 Service 路径，分别用 nslookup 和 `/health/ready` 验证解析与应用连库，比较两者覆盖的环节。
-
-## 没跑通时先查什么
-
-先查两端 Pod Ready，再看 Service selector、EndpointSlice、端口、DNS、CNI 和 NetworkPolicy。策略测试先选非生产 namespace，并准备撤销方式。
-
-DNS 缓存、端口协议以及 NetworkPolicy 对 DNS 出站的限制都可能让排查更绕。刚添加默认拒绝策略时，先明确允许 CoreDNS、数据库和入口等必要通信，再分批启用并用真实请求验证，不要在整个 namespace 一次性封锁所有方向。
-
-NetworkPolicy 选择的是 Pod 标签，写得过宽会把本来不相关的容器圈到同一规则里。给生产服务设计策略时也要检查 namespace 标签是谁能改，避免授权边界因标签编辑权限而失效。
 
 ## 让数据库只接收 API 的连接
 
@@ -104,7 +81,6 @@ kubectl -n container-course describe service postgres
 kubectl -n container-course exec deployment/course-api -- cat /etc/resolv.conf
 ~~~
 
-
 ## 一次 HTTP 请求可以拆成五个可验证的点
 
 假设 API 请求数据库：先确认调用方是否能查到 Service DNS；然后确认 Service 有 EndpointSlice 后端；之后检查目标端口、CNI 路径和 NetworkPolicy；最后才是数据库认证与 SQL。每个阶段的错误形态不同，抓住第一个失败点能缩小范围。
@@ -136,10 +112,6 @@ DNS 输出返回 ClusterIP；curl 返回 ready 且数据库连接可用；Endpoi
 NetworkPolicy 默认采用允许集合语义；当某 Pod 被某类方向策略隔离后，只能通过匹配规则的流量。默认拒绝 egress 后，如果没有允许访问 kube-dns 的 UDP/TCP 53，应用可能连服务名都解析不了。策略作用于 Pod 标签和 namespace 标签，维护标签权限也是策略边界的一部分。
 
 课程数据库策略只限制入站到 5432，没有限制数据库出站，也没有为整个 namespace 建立默认拒绝。生产环境要先列出 DNS、入口、监控、数据库和外部 API 的必要流量，再分阶段启用，逐条测允许和拒绝场景。
-
-## 生产里怎么用、怎么排障
-
-NetworkPolicy 新规则可能默认拒绝 DNS、监控或数据库流量，造成上线后多个依赖同时不可达。先在测试 namespace 按允许列表逐条加策略并观察日志，验证策略插件支持 ingress/egress。抓包和诊断容器要经过授权，生产网络上的请求可能包含敏感数据。
 
 ## 参考资料
 

@@ -40,15 +40,23 @@ Invoke-RestMethod http://localhost:8080/visits
 
 ```powershell
 kind create cluster --name course
+kubectl config use-context kind-course
+kubectl get nodes
+docker build -t container-course-api:local .
 kind load docker-image container-course-api:local --name course
 kubectl apply -f k8s/00-namespace.yaml
 # 仅首次创建 Secret；若已存在且密码未变，跳过这行
 kubectl -n container-course create secret generic course-db --from-literal=password=course-local-only
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.31/deploy/local-path-storage.yaml
+kubectl -n local-path-storage rollout status deployment/local-path-provisioner --timeout=120s
+kubectl get storageclass
 kubectl apply -k k8s
 kubectl -n container-course rollout status deployment/postgres --timeout=120s
 kubectl -n container-course rollout status deployment/course-api --timeout=120s
 kubectl -n container-course port-forward service/course-api 8080:80
 ```
+
+kind 默认没有动态创建持久卷的组件。课程数据库 PVC 使用 `local-path` StorageClass；上面的步骤安装了本地练习用的 provisioner。不要在生产集群照搬这个本地存储插件。生产环境应使用平台支持的 CSI 存储，并另外设计数据库备份和恢复。
 
 另开终端用前面的 `/health/ready` 和 `/visits` 验证服务。kind 只是本地练习集群，不具备生产环境的多节点高可用或云盘备份。删除集群会删除这个练习集群的状态。
 

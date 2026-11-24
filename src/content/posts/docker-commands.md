@@ -1,120 +1,73 @@
 ---
-title: "先记住这几条 Docker 命令：运行、查看、停止和清理"
-date: "2026-11-24"
-summary: "用一个临时 Nginx 容器练习生命周期，分清 stop、rm 和镜像清理。"
-series: "Docker 与 Kubernetes"
+title: 日常先会这几条：查看、看日志、停止和清理容器
+date: '2026-11-24'
+summary: 用一台临时网页服务器练习 Docker 最常用的容器管理命令。
+series: Docker 与 Kubernetes
 order: 4
-tags: ["Docker 基础","Docker","Kubernetes"]
-level: "Docker 基础"
-prerequisites: ["docker-install"]
-goals: ["可以从命令行启动、查看、停止并删除一个练习容器。"]
+tags:
+  - Docker
+  - Docker 入门
+level: Docker 入门
+prerequisites:
+  - docker-image-container
+goals:
+  - 会查容器状态和日志，并能安全地区分停止、删除容器与删除镜像。
 ---
 
-刚开始学 Docker，不用背上百条命令。日常最常见的循环其实很短：启动一个容器，确认它在不在，看输出，停掉，再决定要不要删除。知道自己正在操作哪一层，比记得一个 `prune` 命令更重要。
+不需要一开始背几十条 Docker 命令。先用同一个临时网页练会四件事：确认它在不在、看它说了什么、停止它、收拾干净。
 
-## 概念讲透：它负责什么，不负责什么
+## 启动一个有名字的练习容器
 
-常用操作围绕四类对象：镜像是模板，容器是实例，网络连接实例，卷保存实例之外的数据。stop 让进程有机会结束，rm 删除已停止的容器，rmi 删除本地镜像引用，prune 则按筛选规则清理未使用对象。删容器不等于删卷，删标签也不一定立刻回收被其他标签引用的层。先确认对象，再做删除命令。
-
-## 运行过程拆解：从输入到结果
-
-容器状态可以画成 created → running → exited → removed。stop 会先给主进程发送终止信号并等待，超时后才可能强制结束；rm 删除已停止的实例。对带数据库卷的容器，删掉实例后卷通常还在；对只写可写层的文件则跟实例一起消失。先用 ps 和 inspect 认对象，再决定动作。
-
-## 启动、停止和删除分别改了什么
-
-`run` 创建并启动容器；`ps` 查看运行状态；`stop` 结束进程但保留容器记录；`rm` 删除已停止的容器。镜像又是另一类对象，先用 `image ls` 查看。不要把 `stop` 当删除，也别以为删除容器就一定移除了数据卷。
-
-## 把一个容器从创建用到清理
-
-下面故意让 Nginx 在后台跑，然后停掉但不删除，查看它仍出现在 `ps -a`；最后明确删除 named container。Windows PowerShell 和 macOS/Linux 都可直接运行这些单行命令。
+在终端执行：
 
 ~~~powershell
-docker run -d --name lesson-web -p 127.0.0.1:8080:80 nginx:alpine
+docker run --name command-lab -d -p 127.0.0.1:8083:80 nginx:alpine
 docker ps
-docker stop lesson-web
+~~~
+
+浏览器打开 `http://localhost:8083`，应该能看到 Nginx 欢迎页。若 8083 被占用，换一个本机端口即可；冒号右边的 80 是 Nginx 在容器内使用的端口，不要跟着改。
+
+## 查看状态和日志
+
+`docker ps` 只显示正在运行的容器；想找已经退出的容器，用 `docker ps -a`。`docker logs` 查看程序写到标准输出和标准错误的日志；`-f` 会持续跟随新日志，按 Ctrl+C 退出查看，不会停止容器。
+
+~~~powershell
 docker ps -a
-docker image ls nginx
-~~~
-
-## 怎么确认做对了
-
-stop 之后，`docker ps` 看不到它；`docker ps -a` 仍能看到 Exited。这个阶段容器还没删，先留着给下面的 inspect 检查。每条命令处理的对象不同，这个差别就是 Docker 日常清理的基本功。
-
-## 案例推演
-
-开发机磁盘告急，有人准备复制一条网上的 prune 全清命令。先用 docker system df 找出镜像、构建缓存、容器和卷各自占用，再列出正在使用的容器和卷。确认练习容器可以删后，先 stop 再 rm，最后只清理未使用的构建缓存。不要在有数据库卷的机器上把“清空间”变成“删业务数据”。
-
-## 留一个小练习
-
-等下面把本课容器删掉后，再把 `--name` 换成 `lesson-web-2` 重做一遍。试着连续创建两个同名实例，看看 Docker 为什么拒绝第二个。明确名称能让后续脚本更好读，也避免命令误操作到别的练习。
-
-## 没跑通时先查什么
-
-名字已占用通常是旧容器还在，包括已经退出的容器。用 `docker ps -a` 找到它，确认确实是你的练习，再 rm。不要一上来跑 `docker system prune -a --volumes`：它可能删掉其他项目镜像和本地数据。清理前先看清将删什么。
-
-容器名称也能帮助你隔离不同练习：Compose 会自动按项目名加前缀，直接 docker run 则要自己指定。先用明确名字做小练习，再看 `docker ps --filter name=lesson-web` 定位对象。能准确找对象，清理才不需要一把扫掉整台机器上的东西。
-
-## 检查当前实例，再删容器记录
-
-`docker ps -a` 里这时应该还能看到刚刚停止的 `lesson-web`。inspect 再核对它的状态和来源镜像；确定对象没搞错后，删掉容器记录，再检查 Nginx 镜像仍留在本机。这样也能看清容器和镜像的生命周期并不相同。
-
-~~~powershell
-docker inspect lesson-web --format '{{.State.Status}} {{.Config.Image}}'
-docker rm lesson-web
-docker image ls nginx:alpine
-~~~
-
-
-
-## 命令按对象分组，比死记列表更好用
-
-| 你要查什么 | 常用命令 | 读它能回答什么 |
-|---|---|---|
-| 本机有哪些镜像 | docker image ls / inspect | 镜像名、tag、ID、架构和摘要 |
-| 容器是否运行 | docker ps -a / inspect | 当前状态、退出码、启动参数和挂载 |
-| 程序为什么退出 | docker logs | 标准输出、标准错误和应用自身报错 |
-| 容器里有什么进程 | docker top / stats | 进程列表和运行时资源快照 |
-| 容器内临时检查 | docker exec | 在现有容器里运行一条诊断命令 |
-| 容器之间怎么连 | docker network inspect | 网络成员、地址和网关 |
-| 数据保存在何处 | docker volume inspect | 卷的名称和 Engine 维护的挂载位置 |
-
-inspect 展示的是 Engine 保存的对象配置，logs 是程序输出，stats 是运行时采样，三者不是互相替代的。容器已经退出时，exec 不能进入它，但 logs、inspect 仍可以用来找原因。
-
-## 用一条真实排查链代替盲目重启
-
-假设 web 页面打不开，先按状态、日志、端口、健康检查的顺序收集证据。下面先创建一只专用实验容器；没有诊断完之前不要删除，否则退出原因和日志都可能不好复现。
-
-~~~powershell
-docker run -d --name command-lab -p 127.0.0.1:8088:80 nginx:alpine
-docker ps --filter name=command-lab
 docker logs --tail 20 command-lab
-docker inspect command-lab --format 'status={{.State.Status}} exit={{.State.ExitCode}}'
-docker port command-lab
-docker stats --no-stream command-lab
-docker exec command-lab nginx -t
-docker rm -f command-lab
+docker logs -f command-lab
 ~~~
 
-预期容器状态是 running，端口映射为本机 8088 到容器 80，nginx -t 返回配置测试成功。浏览器访问 localhost:8088 可以验证请求路径。最后一行只清理本节创建的 command-lab；不要把清理命令改成无过滤的全局删除。
+Nginx 欢迎页通常不会产生很多日志。可以刷新浏览器，再运行 `docker logs --tail 20 command-lab` 看访问记录。看日志不是进容器改文件；它只是读取程序输出。
 
-## 清理命令要先看影响范围
-
-docker rm 删除容器实例，docker image rm 删除本地镜像，docker volume rm 删除独立数据卷；它们处理的对象不同。prune 命令会按规则清理一批对象，正式机器上先用 ls、inspect 和过滤条件确认目标。带有 -v 的 Compose down 会清理项目数据卷，删之前要确认是否需要保留或备份。
+## 停止和重新启动
 
 ~~~powershell
-docker ps -a --filter label=course=cleanup
-docker image ls
-docker volume ls
-docker system df
+docker stop command-lab
+docker ps -a
+docker start command-lab
+docker ps
 ~~~
 
-给临时容器添加稳定的 label，然后按 label 精确清理，比按名字猜或直接全局 prune 更安全。不要把命令执行成功当成数据已备份；删除前需要先有可验证的恢复副本。
+停止后容器仍然存在，所以 `docker start` 可以再次启动它。网页应重新可访问。`docker restart` 则是停止再启动的快捷操作；它不会删除容器，也不会修复应用自身的问题。
 
-## 生产里怎么用、怎么排障
+## 删除前先看清楚删什么
 
-生产清理通常要设保留策略：旧镜像按版本和回滚窗口回收，日志按大小和时间轮转，卷必须经数据负责人确认。--volumes 会扩大清理范围，使用前逐个检查卷归属和备份状态。脚本应输出将删除的对象、先 dry-run 或按标签选择，并留审计记录；不要在故障时靠一条范围很大的命令碰运气。
+~~~powershell
+docker stop command-lab
+docker rm command-lab
+docker ps -a
+docker image ls
+~~~
+
+`docker rm` 删除容器，`docker image rm nginx:alpine` 删除镜像。两者是不同对象。容器还在运行时，普通 `docker rm` 会拒绝；先停止再删。这里不要使用 `docker system prune -a --volumes` 之类全局清理命令，它可能清除其他项目仍在使用的数据。
+
+## 出现问题时先收集证据
+
+如果网页打不开，先 `docker ps -a` 看状态，再 `docker logs --tail 50 command-lab` 看错误。如果容器是 Exited，日志通常比立刻重启更有用；如果容器是 Up，再检查端口有没有映射、主机端口有没有被占用。下一课会用一次故意失败的容器练完整排错顺序。
+
+练习：把命令中的主机端口 8083 换成 8084，再启动另一个名字不同的容器。两者能同时运行吗？回答时请说明容器内端口和本机端口各是哪一个。
 
 ## 参考资料
 
-- [docker container 命令](https://docs.docker.com/reference/cli/docker/container/)
-- [Docker 入门](https://docs.docker.com/get-started/)
+- [Docker 容器常用命令](https://docs.docker.com/reference/cli/docker/container/)
+- [docker logs 命令](https://docs.docker.com/reference/cli/docker/container/logs/)

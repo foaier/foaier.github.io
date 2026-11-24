@@ -1,24 +1,21 @@
 ---
-title: "kubectl logs 只看得到眼前：生产日志和指标还要往哪里送"
-date: "2026-11-24"
-summary: "区分日志、指标、链路追踪与事件，理解 Kubernetes 自带能力的边界。"
-series: "Docker 与 Kubernetes"
+title: kubectl logs 只看得到眼前：生产日志和指标还要往哪里送
+date: '2026-11-24'
+summary: 区分日志、指标、链路追踪与事件，理解 Kubernetes 自带能力的边界。
+series: Docker 与 Kubernetes
 order: 37
-tags: ["Kubernetes 进阶","Docker","Kubernetes"]
-level: "Kubernetes 进阶"
-prerequisites: ["k8s-troubleshooting"]
-goals: ["取课程 API 的结构化日志与资源指标，并设计进入集中平台的路径。"]
+tags:
+  - Kubernetes 进阶
+  - Docker
+  - Kubernetes
+level: Kubernetes 进阶
+prerequisites:
+  - k8s-troubleshooting
+goals:
+  - 取课程 API 的结构化日志与资源指标，并设计进入集中平台的路径。
 ---
 
 Pod 重建后本机还能看到哪些旧日志？用户说页面慢，我们能知道是数据库还是外部请求在等吗？临时 `kubectl logs` 适合开始排查，服务长大后就需要持续保存、可关联的数据。
-
-## 概念讲透：它负责什么，不负责什么
-
-日志回答某个请求发生了什么，指标显示系统随时间如何变化，链路追踪连接一次请求经过哪些服务，Events 记录集群对象状态变化。kubectl logs 只适合短时查看，不是集中、长期、可检索的生产日志平台。要让信号可关联，应带上时间、服务名、版本、环境和 trace/request ID。
-
-## 运行过程拆解：从输入到结果
-
-同一请求最好通过 trace ID 关联入口、API、数据库调用和日志；指标使用服务、版本、区域等有限维度看趋势；日志保留具体错误上下文；trace 查调用耗时；Events 帮助发现调度和控制器异常。四类信号互补而不互相替代。设计告警时从用户影响出发，再链接到能验证原因的面板和日志查询。
 
 ## 四类信号分别回答什么问题
 
@@ -36,22 +33,6 @@ kubectl -n container-course get pods -l app=course-api
 kubectl -n container-course top pods
 kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
 ~~~
-
-## 怎么确认做对了
-
-日志前缀便于区分副本；top 能显示当前 CPU、内存采样。这两条无法给出历史延迟走势或跨服务的一次请求耗时；生产需要持久存储与明确的告警路由。
-
-## 案例推演
-
-告警显示 API 延迟飙高。先对照请求量、错误率和延迟分位数判断是否用户受影响；再看 CPU throttling、内存、数据库连接等待；用 trace 找出慢在 API、数据库还是外部调用；最后用结构化日志核对具体异常。不要只因 CPU 平均值正常就排除资源问题。
-
-## 留一个小练习
-
-为一次 API 请求设计必要日志字段：trace ID、路由模板、状态码、耗时、异常类型。哪些内容不能写入日志？再标出 5xx 升高、延迟增加、容器 OOM 分别由哪类信号发现。
-
-## 没跑通时先查什么
-
-先确认应用写标准输出、selector 命中正确 Pod。指标无数据查 Metrics Server/采集器和授权。密码和用户数据不记录；多节点时钟同步也影响日志排序与请求关联。
 
 ## 一个超时告警，应该怎样顺着看
 
@@ -79,7 +60,6 @@ kubectl top nodes
 kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,LAST_EXIT:.status.containerStatuses[0].lastState.terminated.reason'
 kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
 ~~~
-
 
 ## 集群监控通常由几种组件拼起来
 
@@ -120,10 +100,6 @@ kubectl -n container-course get events --field-selector type=Warning --sort-by=.
 一个有用的告警应说明用户影响、触发窗口、值班人和止损步骤。例如“API 5xx 比例连续 5 分钟超过 SLO”比“某 Pod CPU 大于 80%”更直接；CPU 适合作为原因线索，不一定代表用户正在受影响。
 
 避免把用户 ID、完整 URL 或请求 ID 放进 Prometheus 标签，这些高基数维度会让时间序列数量快速增长。它们更适合结构化日志或 trace 属性，并且仍需脱敏与访问控制。
-
-## 生产里怎么用、怎么排障
-
-监控要围绕用户体验定义 SLI/SLO 和告警阈值，避免每个内部指标都叫 P1。日志保留周期、索引字段和采样率会影响费用与隐私；高基数字段不要直接作为指标标签。告警要有值班负责人、排查链接和止损步骤，发布后观察错误率、延迟和饱和度。
 
 ## 参考资料
 
