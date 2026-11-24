@@ -12,6 +12,14 @@ goals: ["检查 Metrics API 与 HPA，并设计有数据库容量约束的扩缩
 
 给 API 多加几个副本不难，难的是高峰时及时扩、低峰时平稳收回，而且新副本能处理更多工作。HPA 是起点，不是让集群无成本无限增长的开关。
 
+## 概念讲透：它负责什么，不负责什么
+
+HPA 根据 CPU、内存或自定义指标调节工作负载副本；CPU 利用率通常相对 request 计算，所以没有合理 request 就难以解释目标百分比。扩副本只能应对应用横向可扩展且下游有余量的压力；节点不足还需要集群自动扩容，队列消费可考虑基于队列长度的指标。
+
+## 运行过程拆解：从输入到结果
+
+HPA 周期性读指标，与目标比较后更新 Deployment 的 scale 子资源，控制器随后按新副本数创建 Pod。Pod 若 Pending，说明调度容量或约束没解决；Pod 已多但数据库耗尽，说明扩容目标超过下游能力。扩缩策略还要考虑未就绪副本、采样延迟和稳定窗口，用端到端请求延迟验证收益，而不只看副本数量变化。
+
 ## 扩副本之前先弄清指标和容量
 
 HorizontalPodAutoscaler 根据 CPU、内存或自定义指标调整 Deployment 副本数。CPU 百分比基于 requests 计算；Metrics Server 不在场时资源指标目标就不可用。队列长度等业务信号需专门的 metrics adapter。
@@ -32,6 +40,10 @@ kubectl -n container-course get deployment course-api -o jsonpath="{.spec.templa
 ## 怎么确认做对了
 
 有 Metrics Server 时 top 与 HPA 才能获取资源信号；没有时 top 报 Metrics API 未注册，HPA 的 current 指标会是 unknown。Deployment 的 requests 和限制仍有效，但自动扩容并未因此开启。
+
+## 案例推演
+
+CPU 已高，HPA 仍显示 unknown。先检查 Metrics API 和 metrics-server，再核对 Pod 是否声明 CPU request、HPA 的 scaleTargetRef 和指标名称。指标正常后制造受控负载，观察副本数和扩容延迟；同时确认数据库连接数上限，避免 API 扩容把数据库压垮。
 
 ## 留一个小练习
 
@@ -74,6 +86,10 @@ kubectl -n container-course delete pod course-load
 kubectl -n container-course delete hpa course-api
 kubectl apply -f k8s/20-api.yaml
 ~~~
+
+## 生产里怎么用、怎么排障
+
+HPA 有采样和稳定窗口，尖峰来得太快时扩容可能赶不上；扩缩容过于激进又会造成抖动。配置行为策略、最小副本和最大副本，按业务延迟与队列积压调优。负载生成实验只在本地或授权环境执行，并监控下游容量；副本变多不等于吞吐必然变大。
 
 ## 参考资料
 

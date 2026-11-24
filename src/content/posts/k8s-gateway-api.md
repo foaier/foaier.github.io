@@ -12,6 +12,14 @@ goals: ["分辨内部服务和集群入口，并说明 Gateway API 资源为什�
 
 在 kind 里 port-forward 很方便，但它是你电脑与某个服务间的临时调试通道，不是网站正式上线的方法。对外提供 HTTP，通常还需要入口实现、DNS、证书和可达的网络。
 
+## 概念讲透：它负责什么，不负责什么
+
+Service 解决集群内部稳定寻址，Gateway API 把集群入口、监听器和 HTTP 路由拆成不同对象，由 Gateway Controller 实际配置代理或负载均衡器。安装 CRD 和写 HTTPRoute 不会凭空产生入口实现；GatewayClass、实现控制器、地址分配、DNS 和 TLS 证书都要齐备。
+
+## 运行过程拆解：从输入到结果
+
+控制器先观察 GatewayClass，再根据 Gateway listener 创建入口实现；HTTPRoute 通过 parentRefs 请求挂到 listener，并受主机名、协议、端口和引用策略约束。控制器把被接受的规则转成数据面配置，返回 status conditions。因而检查顺序应从实现和 listener 到路由接受状态、入口地址、DNS/TLS、后端 EndpointSlice，而不是看到 YAML 存在就认为流量已通。
+
 ## 从内部 Service 到外部入口
 
 Service 负责集群内稳定地址；云厂商的 LoadBalancer Service 通常对接云负载均衡；Gateway API 把入口拆为基础设施拥有的 GatewayClass/Gateway 和应用团队维护的 HTTPRoute。Kubernetes 约定了这些资源的结构，不会因此替你安装能处理流量的 controller。
@@ -32,6 +40,10 @@ kubectl get ingressclass,ingress -A
 ## 怎么确认做对了
 
 kind 通常没有 GatewayClass，或显示 No resources found。这说明没有安装入口 controller，不代表 API 服务本身坏了。如果 Gateway 的 Programmed 状态为空，检查 Conditions 和所用 controller 文档。
+
+## 案例推演
+
+HTTPRoute 已成功 apply，浏览器仍打不开站点。先看 GatewayClass 是否有控制器接管，再看 Gateway 和 Route 的 status conditions、listener 主机名与父子引用授权，然后检查入口 IP/DNS、证书和后端 Service。对象存在不代表控制器接受路由，更不代表外网已经能到达。
 
 ## 留一个小练习
 
@@ -83,6 +95,10 @@ kubectl -n container-course get gateway course-gateway -o yaml
 从入口实现提供的可达地址发请求，同时设置 Host 为 course.example.test。Windows 用 curl.exe 可以避开旧 PowerShell 中 curl 别名差异。域名只是练习匹配条件，不能假装它已在公网解析。只请求入口 IP 却不带正确 Host，常常命中默认路由，这时 API 本身明明健康，用户看到的仍是 404。
 
 TLS 终止后到后端是否继续加密、跨命名空间是否允许引用、证书如何更新，都是额外配置。先把一条 HTTP 路由走通，再逐项增加，故障范围才不会一次扩大到整条链路。
+
+## 生产里怎么用、怎么排障
+
+生产入口要明确 TLS 在哪里终止、证书如何轮换、哪些团队能改公共路由、限流和超时由谁负责。控制器升级可能改变路由行为，需做兼容验证和灰度。公网入口要配防火墙、WAF 或云安全组；服务内部认证不能因为经过网关就省略。
 
 ## 参考资料
 

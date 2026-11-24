@@ -12,6 +12,14 @@ goals: ["查询集群里的 Service DNS，并说明 NetworkPolicy 需要 CNI 支
 
 “两个服务连不上”经常被一句网络故障带过。究竟是程序没监听、Service 没后端、DNS 查不到，还是策略拦了？先按流量路径拆开，比乱加一条 NetworkPolicy 更快。
 
+## 概念讲透：它负责什么，不负责什么
+
+Kubernetes 网络通常由 CNI 给 Pod 配地址并实现跨节点连通，Service 提供稳定虚拟地址，CoreDNS 负责服务名解析，NetworkPolicy 描述允许哪些 Pod/方向流量。策略是否真正执行取决于网络插件。DNS 解析成功只说明名字找到地址，不保证路由、端口监听、TLS、应用认证都正常。
+
+## 运行过程拆解：从输入到结果
+
+一次集群内请求可以按路径拆分：调用方解析 Service DNS，得到 ClusterIP；Service 转发到就绪 EndpointSlice；CNI 负责 Pod 间网络；NetworkPolicy 可能允许或丢弃流量；最后应用完成 TLS、认证和协议处理。每层的成功信号不同。排查时从 name resolution 到 TCP，再到 HTTP 状态逐步测试，不要把“能 ping”当成应用端口正常。
+
 ## 名字解析与实际通信各走哪一层
 
 集群网络模型允许 Pod 按集群规则通信；CNI 插件负责 Pod 网络。Service 提供稳定虚拟地址，CoreDNS 解析 Service 名称，入口 controller 处理外部流量，NetworkPolicy 表达 Pod 流量访问规则。职责不同，不能互相代替。
@@ -31,6 +39,10 @@ kubectl -n container-course get service,endpointslice
 ## 怎么确认做对了
 
 DNS 返回 course-api 的 ClusterIP，CoreDNS Pod 正常，EndpointSlice 有后端。nslookup 成功只验证解析，不能证明 HTTP 端口或数据库请求正常。
+
+## 案例推演
+
+API 能解析 postgres，但 TCP 连接超时。先用同 namespace 的诊断 Pod 解析完整服务名，再测试 5432 端口；同时看 Service 的 EndpointSlice、数据库监听、NetworkPolicy 与 CNI 状态。若 DNS 失败查 CoreDNS 和搜索域；若能连上却认证失败，问题在账号或连接配置，不是网络。
 
 ## 留一个小练习
 
@@ -81,6 +93,10 @@ kubectl -n container-course delete networkpolicy postgres-from-api
 ~~~
 
 如果以后再加默认拒绝出站，要同时考虑 DNS 的 UDP/TCP 53、数据库端口及外部依赖。不要把一次入站练习直接扩成全命名空间双向拒绝。
+
+## 生产里怎么用、怎么排障
+
+NetworkPolicy 新规则可能默认拒绝 DNS、监控或数据库流量，造成上线后多个依赖同时不可达。先在测试 namespace 按允许列表逐条加策略并观察日志，验证策略插件支持 ingress/egress。抓包和诊断容器要经过授权，生产网络上的请求可能包含敏感数据。
 
 ## 参考资料
 

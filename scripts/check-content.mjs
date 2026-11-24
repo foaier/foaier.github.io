@@ -67,6 +67,12 @@ for (const file of files) {
     if (data.series) {
       assert.ok(count >= 450 && headings >= 4 && sourceLinks >= 2, "Series article is missing explanation, lesson sections or references");
     }
+    if (data.series === "Docker 与 Kubernetes") {
+      for (const section of ["## 概念讲透：", "## 运行过程拆解：", "## 案例推演", "## 生产里怎么用、怎么排障"]) {
+        assert.ok(content.includes(section), `Docker/Kubernetes article is missing ${section}`);
+      }
+      assert.ok(count >= 850, `Docker/Kubernetes lesson is too short to teach the topic: ${count} Chinese characters`);
+    }
     assert.equal((content.match(/^```/gm)?.length ?? 0) % 2, 0, "Unclosed fenced code block");
     assert.equal((content.match(/^~~~/gm)?.length ?? 0) % 2, 0, "Unclosed tilde code block");
   } catch (error) {

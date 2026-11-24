@@ -12,6 +12,14 @@ goals: ["通过 ConfigMap 注入日志配置，并解释 Secret base64 不等于
 
 同一份镜像在测试用测试库，在生产用生产库，通常不该为了换连接串重打一份镜像。把普通配置放 ConfigMap、敏感值放 Secret，再由部署清单引用，镜像才能只关注程序和依赖。
 
+## 概念讲透：它负责什么，不负责什么
+
+ConfigMap 保存非敏感配置，Secret 保存需要保护的值并按引用交给 Pod。环境变量一般在容器创建时注入，之后更新 ConfigMap/Secret 不会改掉进程已经读入的环境；卷挂载有更新延迟且应用要支持重读。Secret 的 base64 只是编码，访问 RBAC、etcd 静态加密和备份保护才决定泄露面。
+
+## 运行过程拆解：从输入到结果
+
+ConfigMap 和 Secret 本身不会直接改进程内存。环境变量在新容器创建时注入；挂载文件由 kubelet 更新，但应用是否重新读取由程序决定。更新内容后需计划滚动重启或文件热加载，并确认新 Pod 拿到同一版本配置。为密钥做版本化名称或发布注解可触发可追溯更新，但秘密值仍需独立加密和限制读取。
+
 ## 配置对象更新后，进程未必重读
 
 Secret 并不是“放进去就绝对安全”的保险柜。API 返回的 data 常见是 base64 编码；能读取 Secret 的账号仍能还原明文。生产需要合适的 RBAC、控制面静态加密、审计和密钥轮换，或对接外部秘密管理服务。课程密码只是虚构值，不能照搬到外网。
@@ -34,6 +42,10 @@ kubectl -n container-course get secret course-db
 
 ConfigMap 能列出来；Secret 的 get 列表只显示类型和键数量，不必输出明文检查。新 Pod 的日志更少。这个命令式实验要进入长期配置时，应把非敏感引用写回 YAML；真实 Secret 只提交受保护的加密形式或外部引用。
 
+## 案例推演
+
+运维更新 ConfigMap，Pod 里的日志级别仍没变化。先确认该配置以环境变量还是卷挂载进入容器；环境变量方式通常要触发 Pod 模板变更或滚动重启。重启后检查应用实际生效值，同时确认没有把密码写到 ConfigMap、Git 历史或命令行参数里。
+
 ## 留一个小练习
 
 把 ConfigMap 日志级别改回 Information 后观察现有 Pod：不会仅因 ConfigMap 内容变化就重建。执行 `kubectl -n container-course rollout restart deployment/course-api` 再检查。练完用 `kubectl -n container-course set env deployment/course-api Logging__LogLevel__Default-` 移除实验变量。
@@ -41,6 +53,10 @@ ConfigMap 能列出来；Secret 的 get 列表只显示类型和键数量，不�
 ## 没跑通时先查什么
 
 CreateContainerConfigError 先查引用的 Secret 名与 key，注意大小写。更新 PostgreSQL 的 POSTGRES_PASSWORD 环境变量不会替已有数据目录自动更改数据库用户密码，需要数据库端轮换并协调应用更新。别因为认证失败就直接删卷。
+
+## 生产里怎么用、怎么排障
+
+Secret 会进入 etcd 备份和管理者可读范围，要开启静态加密、限制读取主体、审计访问并建立轮换流程。通过命令行 --from-literal 创建时，值可能留在 shell 历史或进程参数中，生产自动化应安全注入。配置变更前做格式校验和回滚版本，避免错误配置让所有副本同时失去服务。
 
 ## 参考资料
 
