@@ -1,0 +1,19 @@
+# Requires a CNI implementation that enforces NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-from-api
+  namespace: container-course
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: course-api
+      ports:
+        - protocol: TCP
+          port: 5432

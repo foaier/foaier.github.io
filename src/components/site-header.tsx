@@ -5,8 +5,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 const links = [
   { href: "/", label: "首页" },
   { href: "/learn/", label: "从零学 AI" },
+  { href: "/containers/", label: "Docker & K8s" },
   { href: "/articles/", label: "文章" },
-  { href: "/projects/", label: "项目" },
   { href: "/resume/", label: "简历" },
 ];
 
@@ -26,7 +26,7 @@ export function SiteHeader() {
           />
           <span className="profile-name">Foaier</span>
         </Link>
-        <p className="profile-description">后端工程师 · 企业系统 · 数据迁移</p>
+        <p className="profile-description">后端开发 · AI 实践 · 云原生</p>
         <nav aria-label="主导航" className="navbar">
           {links.map(({ href, label }) => (
             <Link className="nav-link" href={href} key={href}>{label}</Link>

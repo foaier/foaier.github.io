@@ -1,0 +1,15 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: os-check
+  namespace: container-course
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: check
+          image: busybox:1.37
+          command: ["/bin/sh", "-c", "uname -s"]

@@ -8,6 +8,12 @@
 
 课程源码位于 `examples/ai-course/`，使用说明见其中的 README。`npm run examples:pack` 生成只含源码的 `public/downloads/ai-course.zip`，构建时自动执行。下载包不手工维护，不收录编译产物、凭证或实验状态。
 
+## Docker 与 Kubernetes 学习路线
+
+访问 `/containers/` 按顺序学习 42 篇 Docker 和 Kubernetes 教程。路线用同一个 ASP.NET Core API + PostgreSQL 案例，包含命令、预期结果、练习、排错与官方延伸资料；本地集群练习使用 kind。
+
+课程源码位于 `examples/container-course/`。`npm run container:pack` 会从这些源码、Docker/Compose 配置和 Kubernetes 清单生成 `public/downloads/container-course.zip`；构建时自动执行。压缩包不包含编译产物、课程外密钥或本地数据。
+
 ## 本地开发
 
 安装 Node.js 22 或更新版本，然后运行：

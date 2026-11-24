@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: course-api
+  namespace: container-course
+spec:
+  selector:
+    app: course-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: course-api
+  namespace: container-course
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: course-api
+  namespace: container-course
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: course-api
+  template:
+    metadata:
+      labels:
+        app: course-api
+    spec:
+      serviceAccountName: course-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: container-course-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: course-db
+                  key: password
+            - name: ConnectionStrings__Default
+              value: Host=postgres;Port=5432;Database=course;Username=course;Password=$(POSTGRES_PASSWORD)
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}

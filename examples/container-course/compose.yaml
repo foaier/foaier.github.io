@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Default: Host=db;Port=5432;Database=course;Username=course;Password=course-local-only
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "dotnet", "ContainerCourse.Api.dll", "--healthcheck"]
+      interval: 20s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: course
+      POSTGRES_USER: course
+      POSTGRES_PASSWORD: course-local-only
+    volumes:
+      - course-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U course -d course"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  course-data:

@@ -66,7 +66,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
           {post.summary ? <p className="article-summary">{post.summary}</p> : null}
         </header>
         {!!post.goals.length && <section className="lesson-guide" aria-label="学习准备">
-          <div className="lesson-guide-top"><span>{post.level || "动手学习"}</span><Link href="/learn/">查看完整学习路线 →</Link></div>
+          <div className="lesson-guide-top"><span>{post.level || "动手学习"}</span><Link href={post.series === "Docker 与 Kubernetes" ? "/containers/" : "/learn/"}>查看完整学习路线 →</Link></div>
           <h2>这篇学会什么</h2><ul>{post.goals.map((goal) => <li key={goal}>{goal}</li>)}</ul>
           <p className="lesson-prerequisites"><strong>先读这几篇：</strong>{prerequisites.length ? prerequisites.map((required, i) => <Fragment key={required.slug}>{i > 0 && " · "}<Link href={`/articles/${required.slug}/`}>{required.title}</Link></Fragment>) : "没有前置文章，直接开始就好。"}</p>
         </section>}

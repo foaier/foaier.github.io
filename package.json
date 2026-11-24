@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "npm run examples:pack",
+    "prebuild": "npm run examples:pack && npm run container:pack",
     "build": "next build",
     "start": "next start",
     "lint": "biome lint src",
     "typecheck": "tsc --noEmit",
-    "content:check": "npm run examples:pack && node scripts/check-content.mjs",
-    "examples:pack": "node scripts/package-examples.mjs"
+    "content:check": "npm run examples:pack && npm run container:pack && node scripts/check-content.mjs",
+    "examples:pack": "node scripts/package-examples.mjs",
+    "container:pack": "node scripts/package-container-course.mjs"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

@@ -27,7 +27,7 @@ export default async function LearnPage() {
       </section>
       <section id="learning-route" className="learning-route" aria-labelledby="route-title">
         <h2 id="route-title">你的学习路线</h2>
-        {series.map((stage, index) => {
+        {series.filter((stage) => stage.inLearn !== false).map((stage, index) => {
           const chapters = posts.filter((post) => post.series === stage.name).sort((a, b) => a.order - b.order);
           return <section className="learning-stage" id={`stage-${stage.id}`} key={stage.id}>
             <span className="stage-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>

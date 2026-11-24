@@ -9,3 +9,4 @@ examples/**/obj/
 examples/**/.state/
 examples/**/.env
 public/downloads/ai-course.zip
+public/downloads/container-course.zip

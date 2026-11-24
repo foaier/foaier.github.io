@@ -10,6 +10,7 @@ const files = readdirSync(directory).filter((file) => file.endsWith(".md"));
 const slugs = new Set(files.map((file) => file.slice(0, -3)));
 const positions = new Map();
 const curriculum = JSON.parse(readFileSync(new URL("../src/content/curriculum.json", import.meta.url), "utf8"));
+const containerCurriculum = JSON.parse(readFileSync(new URL("../src/content/container-curriculum.json", import.meta.url), "utf8"));
 const expectedSeries = curriculum.map((stage) => stage.name);
 const metadata = new Map();
 const errors = [];
@@ -53,7 +54,8 @@ for (const file of files) {
         } else if (node.url.startsWith("/downloads/")) {
           assert.ok(existsSync(new URL(`../public${node.url}`, import.meta.url)), `Missing download: ${node.url}`);
         } else if (/^https?:/.test(node.url)) {
-          assert.equal(new URL(node.url).protocol, "https:", `Use HTTPS: ${node.url}`);
+          const url = new URL(node.url);
+          assert.ok(url.protocol === "https:" || (data.series === "Docker 与 Kubernetes" && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)), `Use HTTPS for non-local links: ${node.url}`);
           sourceLinks++;
         } else {
           assert.ok(!/^(javascript|data|file):/i.test(node.url), `Unsafe link: ${node.url}`);
@@ -90,6 +92,17 @@ try {
     assert.equal(metadata.get(stage.start)?.series, stage.name, `Invalid stage start: ${stage.start}`);
     for (const slug of stage.recommended) assert.equal(metadata.get(slug)?.series, stage.name, `Invalid recommended chapter: ${slug}`);
   }
+  const containerPosts = containerCurriculum.flatMap((stage) => stage.posts);
+  assert.equal(containerPosts.length, 42, "Docker and Kubernetes route must contain 42 lessons");
+  assert.equal(new Set(containerPosts).size, 42, "Docker and Kubernetes route contains duplicate slugs");
+  for (const [index, slug] of containerPosts.entries()) {
+    const post = metadata.get(slug);
+    assert.ok(post, `Missing Docker/Kubernetes lesson: ${slug}`);
+    assert.equal(post.series, "Docker 与 Kubernetes", `Wrong series for ${slug}`);
+    assert.equal(post.order, index + 1, `Wrong course order for ${slug}`);
+    if (index > 0) assert.ok(post.prerequisites.includes(containerPosts[index - 1]), `Missing previous lesson prerequisite: ${slug}`);
+  }
+  assert.equal([...positions.keys()].filter((key) => key.startsWith("Docker 与 Kubernetes/")).length, 42, "Unexpected number of Docker and Kubernetes course articles");
 } catch (error) {
   errors.push(error.message);
 }
