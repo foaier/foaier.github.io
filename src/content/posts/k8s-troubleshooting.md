@@ -1,89 +1,116 @@
 ---
-title: Pod 没起来，别先删：按顺序把原因一层层找出来
+title: Pod 不正常时怎么查：从现象找到原因，再动手修
 date: '2026-11-24'
-summary: 用一套稳定顺序区分授权、调度、拉镜像、进程、探针与 Service 故障。
+summary: 逐个复现拉镜像失败、进程崩溃和服务不通，练习 describe、previous 日志、临时调试容器与恢复验证。
 series: Docker 与 Kubernetes
-order: 36
+order: 45
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
+  - k8s-probes
+  - k8s-resources
   - k8s-networking
 goals:
-  - 通过 Events 和容器日志定位一个可复现问题，并用外部请求验证恢复。
+  - 逐个复现拉镜像失败、进程崩溃和服务不通，练习 describe、previous 日志、临时调试容器与恢复验证。
 ---
+排错先保留现场，再缩小范围。不要一上来删 Pod：删除可能让问题暂时消失，也可能把前一次退出日志和关键事件一起丢掉。我们在 lab 中创建单独的坏服务，不破坏正在使用的 web。
 
-看到报警，第一反应想 delete Pod 很正常，控制器也许会重建它。但如果配置没变，新 Pod 只会原样失败。先保留现场，把范围缩小再动手。
+## 先用一组命令回答三件事
 
-## 先定位故障卡在哪一层
-
-排错顺序从外往内走：先确认 context 与 namespace；再看控制器期望和 Pod 实际；检查 Events、调度、镜像；查看容器退出状态与日志；验证探针、Service 和 EndpointSlice；最后查 DNS、依赖和网络策略。CrashLoopBackOff 是重启退避状态，不是根因。
-
-ImagePullBackOff、CreateContainerConfigError、Pending、Ready 0/1、HTTP 500 分属不同层。判断应用能否服务，最后还得从真实调用方发请求，而不是只看 Pod phase。
-
-## 按对象、事件、日志的顺序找证据
-
-确认 kind-course 后查看课程 API 的对象、最近事件、Pod 描述和日志。选好一只 Pod 再看 `--previous`；当前实例重启过才会有上一次容器日志。
-
-~~~powershell
+~~~bash
 kubectl config current-context
-kubectl -n container-course get deployment,replicaset,pods -o wide
-kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
-$coursePod = kubectl -n container-course get pod -l app=course-api -o jsonpath="{.items[0].metadata.name}"
-kubectl -n container-course describe pod $coursePod
-kubectl -n container-course logs $coursePod --all-containers=true --tail=100
-kubectl -n container-course logs $coursePod --previous --all-containers=true --tail=100
-kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api
+kubectl -n lab get deployments,pods,services -o wide
+kubectl -n lab get events --sort-by=.metadata.creationTimestamp
 ~~~
 
-## 快速筛告警事件和重启中的 Pod
+先确认操作的是 kind-course，再看有没有创建 Pod、Pod 是否有节点、容器是否启动。没有 Pod 就查控制器和准入事件；Pending 查调度；启动后退出查进程日志；Running 但请求失败再分 DNS、Service、端口和应用层。
 
-如果集群对象很多，先把事件缩到 Warning，再看 API Pod 的阶段、重启次数和等待原因。Pending 先看调度 Events；ImagePullBackOff 看镜像引用与拉取凭证；CrashLoopBackOff 再查当前或上一轮日志。
+## 练习一：镜像标签打错
 
-~~~powershell
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
-kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,PHASE:.status.phase,RESTARTS:.status.containerStatuses[0].restartCount,WAITING:.status.containerStatuses[0].state.waiting.reason'
-kubectl -n container-course describe deployment/course-api
+~~~bash
+kubectl -n lab create deployment broken-image --image=nginx:foaier-not-a-tag
+kubectl -n lab get pods -l app=broken-image
+kubectl -n lab describe pods -l app=broken-image
 ~~~
 
-## 常见状态对应的第一条证据
+事件会显示拉取失败，状态可能从 ErrImagePull 进入 ImagePullBackOff。BackOff 是退避重试，并不是一个独立根因。仓库返回 not found、unauthorized、timeout 的处理不同：分别查标签、imagePullSecrets、网络。还没成功启动容器时，logs 通常没有应用日志。
 
-| 状态或现象 | 第一处看什么 | 下一步 |
-|---|---|---|
-| Pending | describe Pod 的 FailedScheduling / PVC Events | 比较 requests、节点标签、taints、PVC |
-| ImagePullBackOff | Pod Events 中的镜像地址与错误码 | 核对 tag、架构、imagePullSecret 和节点网络 |
-| CreateContainerConfigError | Events 中缺失的 ConfigMap/Secret key | 检查对象 namespace、名字和 key |
-| CrashLoopBackOff | logs --previous 和 lastState | 看进程退出码、启动参数、依赖和探针 |
-| Running 但 Ready 0/1 | readiness 事件与应用响应 | 查依赖、端口、就绪路径 |
-| Service 503 | EndpointSlice 与后端 Pod Ready | 再查 selector、网络策略和入口 |
-
-这些状态不是最终诊断。比如 CrashLoopBackOff 只说明失败容器在退避后重试，根因可能是配置错误、进程启动失败、探针杀死或依赖不通。
-
-## 一次事故收集最小可复现信息
-
-先确定上下文、namespace、变更时间和影响范围，再收集对象、Events、当前日志与上一轮日志。命令输出可能包含内部地址或业务数据，转发给他人前要做脱敏。
-
-~~~powershell
-kubectl config current-context
-kubectl -n container-course get deployment,replicaset,pods,service,endpointslice -o wide
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
-kubectl -n container-course describe deployment/course-api
-$coursePod = kubectl -n container-course get pod -l app=course-api -o jsonpath='{.items[0].metadata.name}'
-kubectl -n container-course logs $coursePod --all-containers=true --tail=100 --timestamps
-kubectl -n container-course logs $coursePod --all-containers=true --previous --tail=100 --timestamps
+~~~bash
+kubectl -n lab set image deployment/broken-image nginx=nginx:1.28-alpine
+kubectl -n lab rollout status deployment/broken-image --timeout=180s
+kubectl -n lab delete deployment broken-image
 ~~~
 
-日志中看不到启动前的拉取错误，要回到 Events；上一轮日志为空通常说明容器没有重启或没有上一实例。若对象已经被删除，先查控制器是否重建；不要用反复删 Pod 来替代根因分析。
+修正后必须等 rollout 成功，不是 set image 返回 updated 就结束。若集群节点无法出网，宿主机能拉镜像也不能证明节点拉取一定成功。
 
-## 从症状到修复要保留一条因果链
+## 练习二：进程启动后立即失败
 
-记录“用户看到什么 → 哪个对象异常 → 哪条事件/日志支持判断 → 哪个配置导致它 → 改了什么 → 怎么验证恢复”。只写“重启后好了”无法解释是资源耗尽、节点恢复还是偶发故障，也无法阻止问题再次出现。
+~~~bash
+kubectl -n lab create deployment crash-demo --image=busybox:1.37 -- sh -c 'echo missing-required-config; exit 1'
+kubectl -n lab get pods -l app=crash-demo -w
+~~~
 
-修复后至少验证两层：Pod 已 Ready 且进入 EndpointSlice；真实调用方访问服务成功。涉及数据库时再验证业务读写和数据完整性。恢复后补上监控、发布前校验、容量或权限改进，使下一次能够更早发现。
+出现重启后按 Ctrl+C，接着查本次与前次日志：
 
-## 参考资料
+~~~bash
+lab_pod=$(kubectl -n lab get pods -l app=crash-demo -o jsonpath='{.items[0].metadata.name}')
+kubectl -n lab logs "$lab_pod" --tail=20
+kubectl -n lab logs "$lab_pod" --previous --tail=20
+kubectl -n lab describe pod "$lab_pod"
+kubectl -n lab patch deployment crash-demo --type=merge -p '{"spec":{"template":{"spec":{"containers":[{"name":"busybox","image":"busybox:1.37","command":["sh","-c","echo recovered; sleep 3600"]}]}}}}'
+kubectl -n lab rollout status deployment/crash-demo --timeout=120s
+kubectl -n lab delete deployment crash-demo
+~~~
 
-- [调试运行中的 Pod](https://kubernetes.io/docs/tasks/debug/debug-application/)
-- [kubectl logs 命令](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/)
+`--previous` 看同一 Pod 内前一个容器实例，不是昨天那个已经删除的 Pod。Last State 的 reason 和 exitCode 配合日志分析；CrashLoopBackOff 只是反复退出后的等待状态，真正错误在 missing-required-config。
+
+## 练习三：容器里没有 curl，怎么调试
+
+不要为了排错把整套运维工具永久装进业务镜像。可以加入临时容器，共享这个 Pod 的网络：
+
+~~~bash
+kubectl apply -f basics/deployment.yaml -f basics/service.yaml
+kubectl -n lab rollout status deployment/web --timeout=120s
+lab_pod=$(kubectl -n lab get pods -l app=web -o jsonpath='{.items[0].metadata.name}')
+kubectl -n lab debug "$lab_pod" -it --image=busybox:1.37 --container=net-debug -- sh
+~~~
+
+进入容器后执行：
+
+~~~sh
+wget -S -O- http://127.0.0.1
+nslookup web.lab.svc.cluster.local
+wget -S -O- http://web.lab
+exit
+~~~
+
+localhost 成功说明同 Pod 的应用端口可访问；DNS 失败但 IP 成功就查 DNS；域名解析成功而连接失败就继续查 Service 后端和策略。临时容器不能像普通容器一样随意删除或重启，调试退出后记录仍在 Pod 中；需要相应 RBAC 和准入许可。`--target` 的进程查看能力还取决于运行时，不能保证看到别的容器所有进程。
+
+## 把现象和下一条命令对应起来
+
+| 现象 | 先查 | 常见方向 |
+| --- | --- | --- |
+| Pending，没节点 | describe pod 的 Events | 资源、污点、亲和性、PVC |
+| ContainerCreating 很久 | Events | 挂载、CNI、镜像、沙箱创建 |
+| CreateContainerConfigError | Events | 缺 Secret、ConfigMap 或 key |
+| OOMKilled | terminated、lastState、资源配置 | 内存上限、增长、节点压力 |
+| Running 但 0/1 | 探针事件和应用日志 | readiness 路径、依赖、超时 |
+| Service 无后端 | EndpointSlice、标签和 Ready | selector、端口名、探针 |
+
+## 修复后如何确认不是碰巧恢复
+
+重新请求业务接口，确认状态码与返回内容；观察错误率和重启次数不再增长；再验证发布文件已经修正，避免下次 apply 复发。记录触发条件、证据、根因、修复和预防动作，比写“重启后好了”有用。
+
+~~~bash
+kubectl -n lab rollout restart deployment/web
+kubectl -n lab rollout status deployment/web --timeout=120s
+kubectl -n lab get pods -l app=web
+~~~
+
+本课最后滚动替换 web，以移除临时调试容器。平时不要把这两条重启命令当成第一步诊断工具。
+
+## 继续阅读
+
+- [调试 Pod](https://kubernetes.io/zh-cn/docs/tasks/debug/debug-application/debug-pods/)
+- [临时容器](https://kubernetes.io/zh-cn/docs/concepts/workloads/pods/ephemeral-containers/)

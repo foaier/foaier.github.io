@@ -1,70 +1,124 @@
 ---
-title: 进程活着，服务却不能用：三种探针分别在问什么
+title: 探针：进程还活着，为什么服务不能接请求
 date: '2026-11-24'
-summary: 用数据库断开实验区分 startup、liveness 和 readiness。
+summary: 对同一个网页实验 startup、readiness 和 liveness，主动制造未就绪与重启，并观察后端变化。
 series: Docker 与 Kubernetes
-order: 26
+order: 33
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
   - k8s-config-secrets
+  - k8s-service
 goals:
-  - 观察 API 失去数据库连接时只退出就绪后端，而不被反复重启。
+  - 对同一个网页实验 startup、readiness 和 liveness，主动制造未就绪与重启，并观察后端变化。
 ---
+进程存在，不代表业务能用。程序可能还在加载数据，也可能卡死，或者暂时失去数据库连接。探针让 Kubernetes 按不同目的检查容器，不用把所有故障都用“重启”处理。
 
-最难排的故障之一，是 Pod 显示 Running，用户却一直拿到 500。Kubernetes 不知道你的一次业务请求需要数据库，它只能按你给的探针判断状态。问错问题，就可能在数据库短暂故障时把所有 API 一起重启。
+## 三种探针分别决定什么
 
-## 三种探针各自问一个问题
+| 探针 | 失败后主要动作 | 适合检查什么 |
+| --- | --- | --- |
+| startupProbe | 超过阈值后重启容器；成功前暂停另外两种探针 | 慢启动阶段是否完成 |
+| readinessProbe | 将容器标为未就绪，通常停止向它分配新的 Service 流量 | 是否可以接业务请求 |
+| livenessProbe | 超过阈值后按重启策略重启容器 | 进程是否进入无法自行恢复的状态 |
 
-startup 判断程序是否启动完成，它成功前会压住另外两种探针。liveness 判断进程是否到了需要重启的地步；readiness 判断此刻是否该接业务流量。readiness 失败通常会让该 Pod 不再作为就绪 Service 后端，但不会因此重启容器。
+数据库短暂掉线就让所有 API liveness 失败，会引发重启风暴。依赖故障常适合反映在 readiness，liveness 尽量关注进程自身。HTTP、TCP、exec 和 gRPC 探测各有适用范围；TCP 连得上，只说明端口接受连接。
 
-课程 `/health/live` 只看进程响应，`/health/ready` 会查询数据库。不要把数据库连不上写成必定 liveness 失败，否则数据库出问题时 API 重启风暴只会加重负担。阈值、超时和周期要结合启动时间、依赖耗时以及故障恢复目标。
+## 启动一个可手动控制健康状态的网页
 
-## 停掉数据库，看看 API 的反应
-
-先开着 API 的 port-forward，另一个终端仅在 kind-course 中把数据库降为零，观察 API readiness。实验会中断课程服务，请确保当前只有虚构数据；做完立即恢复数据库。
-
-~~~powershell
-$context = kubectl config current-context
-if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在本地 kind-course 中练习" }
-kubectl -n container-course scale deployment/postgres --replicas=0
-kubectl -n container-course get pods -l app=course-api -w
-# 观察 API READY 变为 0/1 后按 Ctrl+C，恢复数据库
-kubectl -n container-course scale deployment/postgres --replicas=1
-kubectl -n container-course rollout status deployment/postgres --timeout=180s
-kubectl -n container-course wait --for=condition=Ready pod -l app=course-api --timeout=180s
+~~~yaml file=health/probes.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-web
+  namespace: lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: probe-web}
+  template:
+    metadata:
+      labels: {app: probe-web}
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28-alpine
+          command: ["sh", "-c"]
+          args: ["touch /tmp/ready /tmp/alive; exec nginx -g 'daemon off;'"]
+          ports:
+            - {name: http, containerPort: 80}
+          startupProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            exec: {command: ["test", "-f", "/tmp/ready"]}
+            periodSeconds: 2
+            failureThreshold: 1
+          livenessProbe:
+            exec: {command: ["test", "-f", "/tmp/alive"]}
+            periodSeconds: 2
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: probe-web
+  namespace: lab
+spec:
+  selector: {app: probe-web}
+  ports:
+    - {port: 80, targetPort: http}
 ~~~
 
-## 观察 readiness 失败时端点如何变化
-
-仅在本地课程集群执行数据库故障实验。readiness 失败时 API 仍可能 Running，但会从就绪端点暂时移除；它本身不应导致容器重启。describe 中 Events 显示探针失败原因。恢复数据库后等 Pod Ready，再确认地址重新加入。
-
-~~~powershell
-kubectl -n container-course get pods -l app=course-api
-kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -w
-kubectl -n container-course describe pod -l app=course-api
+~~~bash
+kubectl apply -f health/probes.yaml
+kubectl -n lab rollout status deployment/probe-web --timeout=180s
+kubectl -n lab get pods -l app=probe-web
 ~~~
 
-## 三种探针的后果完全不同
+`periodSeconds` 是检查间隔；`failureThreshold` 是连续失败次数；没有写的 timeoutSeconds 默认 1 秒。启动探针在这里给出约一分钟的失败预算，不是严格保证总启动时间恰好等于两数相乘。exec 检查的是文件是否存在，不是生产推荐的健康接口，只是让现象可控。
 
-| 探针 | 它在问什么 | 失败后 Kubernetes 做什么 |
-|---|---|---|
-| startupProbe | 程序是否完成启动 | 启动期间先不执行 liveness/readiness；超过阈值后按启动失败处理 |
-| livenessProbe | 进程是否已经无法自愈 | 达到失败阈值后重启该容器 |
-| readinessProbe | 这个副本此刻能否接流量 | 从 Service 的可用 EndpointSlice 后端中移除，容器通常继续运行 |
+## 删除 ready 文件，看未就绪但不重启
 
-把“依赖数据库是否通”加进 liveness，可能让数据库短暂故障时所有 API 一起重启，反而制造雪崩。数据库依赖通常属于 readiness 或业务层故障响应；liveness 应只检查进程无法自行恢复的状态。
+~~~bash
+kubectl -n lab exec deployment/probe-web -- rm /tmp/ready
+kubectl -n lab get pods -l app=probe-web -w
+~~~
 
-## 参数决定故障检测速度，也决定误报概率
+几秒后看到 `0/1 Running`，RESTARTS 不应因为 readiness 失败而增加。按 Ctrl+C，再检查后端条件：
 
-periodSeconds 是检查间隔，timeoutSeconds 是单次超时，failureThreshold 是连续失败阈值，successThreshold 是恢复所需连续成功次数。startupProbe 的失败预算大约是 periodSeconds × failureThreshold；例如启动需要 40 秒，就不能只给 5 次、每次间隔 3 秒的启动预算。
+~~~bash
+kubectl -n lab get endpointslices -l kubernetes.io/service-name=probe-web -o yaml
+kubectl -n lab exec deployment/probe-web -- touch /tmp/ready
+kubectl -n lab rollout status deployment/probe-web --timeout=120s
+~~~
 
-HTTP 检查要求目标容器在 Pod 网络中能通过指定端口和路径响应。TCP 检查只证明连接能建立，不证明业务请求成功；exec 检查在容器内运行命令，但会增加节点负担。优先选择与应用真实就绪条件接近、又不会依赖外部偶发故障的检查。
+未就绪时 EndpointSlice 的地址可能仍在，但 `conditions.ready` 是 false，不要仅凭地址存在就说流量会转过去。恢复文件后等待它重新 Ready。
 
-## 参考资料
+## 删除 alive 文件，看容器重启
 
-- [探针配置](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
-- [容器探针](https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/)
+~~~bash
+kubectl -n lab exec deployment/probe-web -- rm /tmp/alive
+kubectl -n lab get pods -l app=probe-web -w
+~~~
+
+经过数次失败和退出过程后 RESTARTS 增加；启动命令重新建立两个文件，容器恢复就绪。Pod 的名字通常不变，因为这是同一 Pod 内重启容器。按 Ctrl+C，再看 describe 中的 Unhealthy、Killing 和重启记录。
+
+## 正式服务怎样选阈值
+
+按应用启动时长、正常请求耗时和可接受摘流延迟决定参数，先观测再调。启动可能要两分钟，就不要给十秒预算；健康接口不应每次扫描整张数据库表；检查超时要有边界。readiness 也不能替代连接排空，旧连接和已经进入处理的请求不会神奇消失。
+
+~~~bash
+kubectl -n lab describe pod -l app=probe-web
+kubectl -n lab logs deployment/probe-web --previous --tail=20
+kubectl delete -f health/probes.yaml
+~~~
+
+`--previous` 查看前一次容器实例的日志，只有发生过重启才有。清理只删 probe-web，基础网页不受影响。生产排错时先保留日志和事件，再决定是否重启，避免刚好把失败证据清掉。
+
+## 继续阅读
+
+- [配置存活、就绪和启动探针](https://kubernetes.io/zh-cn/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+- [Pod 就绪状态](https://kubernetes.io/zh-cn/docs/concepts/workloads/pods/pod-lifecycle/#pod-readiness)

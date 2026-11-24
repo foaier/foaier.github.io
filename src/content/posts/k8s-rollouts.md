@@ -1,102 +1,87 @@
 ---
-title: 发布新版本怎么尽量少中断？滚动更新、观察和回滚一起练
+title: 发布新版本：滚动更新、坏镜像回滚和蓝绿切换
 date: '2026-11-24'
-summary: 用两个可追溯镜像标签练发布，并故意制造失败看 rollout 如何卡住。
+summary: 观察新旧 ReplicaSet 的变化，故意发布一个不存在的镜像，再完成回滚并理解流量切换边界。
 series: Docker 与 Kubernetes
-order: 28
+order: 35
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
-  - k8s-resources
+  - k8s-deployment
+  - k8s-probes
 goals:
-  - 执行一次 API 滚动发布并用 rollout undo 恢复上个 Pod 模板。
+  - 观察新旧 ReplicaSet 的变化，故意发布一个不存在的镜像，再完成回滚并理解流量切换边界。
 ---
+发布不是“把镜像名改了就完事”。你需要知道新副本有没有就绪、旧副本是否还在服务、卡住时怎么退回。先使用 lab 中已有的 web Deployment，实验前重新 apply 基础文件，把前面可能做过的改动恢复到已知状态。
 
-镜像推到仓库，只完成了交付的一半。部署时旧副本要不要等新副本就绪、失败后会不会一直卡着、回滚能恢复什么，都得想清楚。Kubernetes 的滚动更新提供机制，业务是否无中断还受连接、探针和数据库变更影响。
+## 滚动更新怎么安排新旧副本
 
-## 发布节奏由副本和探针一起决定
+Deployment 默认使用 RollingUpdate。`maxSurge` 控制允许多出多少期望副本，`maxUnavailable` 控制更新时允许少多少可用副本；百分比有不同取整规则，初学时直接写整数更容易观察。Recreate 则先结束旧 Pod 再创建新 Pod，会有明显空档。
 
-Deployment 的 RollingUpdate 用 maxSurge 控制临时多出的副本、maxUnavailable 控制更新期间允许不可用的数量。Readiness 应当真实反映接流量能力；否则新 Pod 刚起来就被当成可用。旧进程还要能优雅处理 SIGTERM，留出请求完成与连接摘除的时间。
-
-rollout undo 回退的是历史 Pod 模板，不能把 PostgreSQL 已执行的破坏性迁移倒回去。发布前用兼容的新旧字段、分阶段迁移和可靠备份，数据库回滚需要单独设计。
-
-## 用两个版本标签练一次回滚
-
-先用已有课程镜像打两个练习标签，内容相同，重点观察标签与 ReplicaSet 变化。载入 kind 后部署 v1、再 v2。此时不要同时修改其他配置，便于明确此次回滚的范围。
-
-~~~powershell
-docker tag container-course-api:local container-course-api:v1
-docker tag container-course-api:local container-course-api:v2
-kind load docker-image container-course-api:v1 container-course-api:v2 --name course
-kubectl -n container-course set image deployment/course-api api=container-course-api:v1
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course set image deployment/course-api api=container-course-api:v2
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course rollout history deployment/course-api
-kubectl -n container-course rollout undo deployment/course-api
-kubectl -n container-course rollout status deployment/course-api
+~~~bash
+kubectl apply -f basics/deployment.yaml -f basics/service.yaml
+kubectl -n lab patch deployment web --type=merge -p '{"spec":{"strategy":{"type":"RollingUpdate","rollingUpdate":{"maxSurge":1,"maxUnavailable":0}},"minReadySeconds":5,"progressDeadlineSeconds":90}}'
+kubectl -n lab set image deployment/web nginx=nginx:1.28.0-alpine
+kubectl -n lab rollout status deployment/web --timeout=180s
+kubectl -n lab get rs
+kubectl -n lab rollout history deployment/web
 ~~~
 
-## 用 ReplicaSet 记录确认发布和回滚结果
+两个副本时，最多额外启动一个新 Pod，等新实例保持 Ready 一段时间再减少旧副本。没有业务 readiness 时，Ready 未必代表业务真的准备好；正式服务应结合上一课探针，而不是仅靠 minReadySeconds 猜测。
 
-不用再重复 rollout history。先看 API 的 ReplicaSet 是否保留新旧模板，再列出每个 Pod 实际用的镜像和 readiness；这比仅看到命令返回成功更能说明当前流量后端是什么版本。
+## 发布一个不存在的标签
 
-~~~powershell
-kubectl -n container-course get replicasets -l app=course-api --sort-by=.metadata.creationTimestamp
-kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
-kubectl -n container-course describe deployment/course-api
+~~~bash
+kubectl -n lab set image deployment/web nginx=nginx:foaier-does-not-exist
+kubectl -n lab rollout status deployment/web --timeout=110s
+kubectl -n lab get pods -l app=web
+kubectl -n lab describe pod -l app=web
 ~~~
 
-## 滚动更新的三个条件要同时成立
+rollout 会失败或超时，新 Pod 的事件显示拉取失败，旧 Pod 因 maxUnavailable 为 0 仍保留。这里故意失败，不要把非零退出码当成教程走不下去。集群有足够资源和正常旧副本才有这个效果，配置本身无法凭空保证业务无损。
 
-Deployment 更新模板后创建新 ReplicaSet，再根据 maxSurge 和 maxUnavailable 调整新旧 Pod。新 Pod 只有通过 readiness 后才会被 Service 接流量；如果镜像拉取失败或探针配置错误，旧副本可能继续承载流量，发布则停在 Progressing。
+## 回滚到上一份 Pod 模板
 
-maxSurge 控制升级时最多多出多少副本，maxUnavailable 控制最多允许多少副本不可用。副本少、启动慢或节点资源不足时，保守策略会让更新更安全但更慢。readiness 通过只证明探针定义的条件，不证明完整的业务迁移和数据一致性。
-
-## 用新镜像 tag 做一次可回滚发布
-
-先在课程目录构建 v2 镜像并载入 kind，再更新 Deployment。这里镜像内容与本地版本相同，重点是观察一个新模板 tag 如何触发新 revision；若要演示真实代码变化，可先修改 API 响应并重新构建。
-
-~~~powershell
-$context = kubectl config current-context
-if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在本地 kind-course 练习" }
-docker build -t container-course-api:v2 .
-kind load docker-image container-course-api:v2 --name course
-kubectl -n container-course set image deployment/course-api api=container-course-api:v2
-kubectl -n container-course rollout status deployment/course-api --timeout=180s
-kubectl -n container-course rollout history deployment/course-api
-Invoke-RestMethod http://localhost:8080/health/ready
+~~~bash
+kubectl -n lab rollout undo deployment/web
+kubectl -n lab rollout status deployment/web --timeout=180s
+kubectl -n lab get deployment web -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+kubectl -n lab get rs
 ~~~
 
-容器名 api 来自 Pod template。新 ReplicaSet 创建后，新 Pod 要通过 startup/readiness 才会进入后端。若没有 port-forward，另开终端运行 kubectl -n container-course port-forward service/course-api 8080:80。
+镜像恢复到上一版，失败 ReplicaSet 缩到零。`rollout undo` 回退的是 Deployment Pod 模板，不会回滚数据库结构、外部配置或用户数据。兼容性不好的数据库迁移，即便代码回滚也可能不能运行，因此迁移应尽量采用先兼容、再切换、最后清理的步骤。
 
-## 回滚回的是模板，不是所有数据
+## 暂停发布和指定历史版本
 
-如果发布后接口失败，可在确认当前 context 后 undo 到前一个 revision。命令只回滚 Deployment 模板，不会自动回滚数据库 schema、已经写入的记录或外部消息。
-
-~~~powershell
-kubectl -n container-course rollout undo deployment/course-api
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course rollout history deployment/course-api
-kubectl -n container-course get pods -l app=course-api -o wide
+~~~bash
+kubectl -n lab rollout pause deployment/web
+kubectl -n lab set image deployment/web nginx=nginx:1.28-alpine
+kubectl -n lab rollout resume deployment/web
+kubectl -n lab rollout status deployment/web --timeout=180s
+kubectl -n lab rollout history deployment/web
 ~~~
 
-生产发布前要考虑新旧应用同时运行期间的数据兼容。较安全的数据库迁移通常分为“先加兼容字段、应用升级、确认稳定、再删除旧字段”，而不是先破坏旧版本依赖的数据结构。
+pause 可暂缓多次模板修改引起的发布，不会冻结集群所有操作。要回退某次历史，先用 history 查到真实 revision，再执行带 `--to-revision` 的 undo；不能保证读者环境里“第 2 版”一定是好版本。修复后还要更新配置仓库，否则下次 apply 可能再次发布坏镜像。
 
-## 发布卡住时看条件和事件，不要盲目重启
+## 蓝绿与金丝雀解决不同问题
 
-先看 Deployment conditions 和 rollout status，再看新旧 ReplicaSet、Pod 的镜像、探针和 Events。ProgressDeadlineExceeded 说明在给定期限内未观察到进展，是诊断信号，不会自动把应用回滚到旧版本。
+蓝绿是两套完整部署，验证绿色后把 Service selector 从蓝切到绿，失败时切回；切换不会迁移已经建立的 TCP 连接。金丝雀让少部分流量先进入新版，观察错误率、延迟等指标后扩大比例。只靠两个 Deployment 的 Pod 数量，并不能严格保证 HTTP 请求按 90/10 分配，连接复用会影响分布；精确权重通常交给入口或服务网格。
 
-~~~powershell
-kubectl -n container-course describe deployment course-api
-kubectl -n container-course get rs,pods -l app=course-api -o wide
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+可在本地做一个简单蓝绿切换：
+
+~~~bash
+kubectl -n lab create deployment web-green --image=nginx:1.28-alpine
+kubectl -n lab rollout status deployment/web-green --timeout=120s
+kubectl -n lab patch service web --type=merge -p '{"spec":{"selector":{"app":"web-green"}}}'
+kubectl -n lab get endpointslices -l kubernetes.io/service-name=web
+kubectl apply -f basics/service.yaml
+kubectl -n lab delete deployment web-green
 ~~~
 
-## 参考资料
+两个版本页面相同，本实验重点看 EndpointSlice 指向改变；正式验收要用版本响应和业务请求确认。最后恢复基础 Service，清理绿色部署，保留 web。
 
-- [Deployment 滚动发布](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
-- [Pod 生命周期与停止](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/)
+## 继续阅读
+
+- [Deployment 更新策略](https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/deployment/)
+- [kubectl rollout](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/)

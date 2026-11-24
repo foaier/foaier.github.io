@@ -1,0 +1,8 @@
+apiVersion: learning.foaier.local/v1alpha1
+kind: Note
+metadata:
+  name: first-note
+  namespace: lab
+spec:
+  title: 学会检查 EndpointSlice
+  priority: 2

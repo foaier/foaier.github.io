@@ -1,76 +1,108 @@
 ---
-title: "删掉一个 Pod，它为什么又回来了？用 Deployment 维持副本"
-date: "2026-11-24"
-summary: "亲自删除 API 副本、观察自动补齐，再把临时改动恢复成清单里的设置。"
-series: "Docker 与 Kubernetes"
-order: 22
-tags: ["Kubernetes 入门", "Docker"]
-level: "Kubernetes 入门"
-prerequisites: ["k8s-pod-yaml"]
-goals: ["观察 Deployment 补齐副本，能查看副本数并恢复部署配置。"]
+title: Deployment：删掉一个 Pod，为什么又长出来一个
+date: '2026-11-24'
+summary: 用副本实验认识 Deployment、ReplicaSet 和标签选择器，再练习扩容、缩容与声明式配置。
+series: Docker 与 Kubernetes
+order: 28
+tags:
+  - Kubernetes
+level: Kubernetes 入门
+prerequisites:
+  - k8s-pod-yaml
+goals:
+  - 用副本实验认识 Deployment、ReplicaSet 和标签选择器，再练习扩容、缩容与声明式配置。
 ---
+独立 Pod 被删就没了。网页需要持续提供服务，我们需要一个对象记住“始终有两个副本”。这个对象就是 Deployment。它通过 ReplicaSet 管理 Pod 数量，还能在之后的发布过程中管理新旧版本。
 
-上一课的 Pod 被删除后就消失了。现在看课程 API 的 Deployment：它记着“我要两个 API 副本”，发现少了一个就会安排新的 Pod。新 Pod 名字会变，这是正常的；你要关注的是副本数和服务状态。
+## 先看三个对象的分工
 
-## 先确认自己连的是练习集群
+Deployment 管发布和 Pod 模板；ReplicaSet 按选择器维持副本数；Pod 承载实际容器。日常修改 Deployment，通常不用手工创建或修改它下面的 ReplicaSet。控制器发现副本不足时补建，并不是复活原来那个 Pod，IP、名字尾巴和 UID 都可能改变。
 
-~~~powershell
-kubectl config current-context
-kubectl -n container-course get deployment,pod
+## 用文件部署两个网页
+
+实验包 `basics/deployment.yaml` 如下。三个 `app: web` 要分清：Deployment 自身可以有标签，但真正关联副本的是 `spec.selector` 和 `spec.template.metadata.labels`。
+
+~~~yaml file=basics/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.28-alpine
+          ports:
+            - name: http
+              containerPort: 80
 ~~~
 
-第一条必须是 `kind-course`。第二条应看到 `course-api` 的 READY 是 `2/2`。如果没有这项 Deployment，回到本课集群安装章节把示例应用部署成功，不要临时在别的集群上继续。
-
-## 删除一个 API 副本，观察它回来
-
-下面命令会从课程 API 中挑一个 Pod 删除，不会删除数据库。`-w` 会持续显示状态变化；看到新 Pod 出现并变成 Running 后，在终端按 Ctrl+C 停止观察。
-
-~~~powershell
-$coursePod = kubectl -n container-course get pod -l app=course-api -o jsonpath="{.items[0].metadata.name}"
-kubectl -n container-course delete pod $coursePod
-kubectl -n container-course get pods -l app=course-api -w
+~~~bash
+kubectl apply -f basics/deployment.yaml
+kubectl -n lab rollout status deployment/web --timeout=120s
+kubectl -n lab get deployment,replicaset,pod -l app=web
+kubectl -n lab get deployment web
 ~~~
 
-再检查 Deployment 和 Pod 数量，应该重新有两个 API 副本：
+第一条 get 用标签过滤，Deployment 自身没有 app 标签，所以可能只显示 ReplicaSet 和 Pod；下一条按名字查 Deployment。看到 `READY 2/2`、两个 Pod `1/1 Running` 表示成功。`replicas: 2` 是两个 Pod，不是一个 Pod 里塞两个 Nginx。
 
-~~~powershell
-kubectl -n container-course get deployment course-api
-kubectl -n container-course get pods -l app=course-api -o wide
+## 删一个，观察新 Pod 出现
+
+打开两个终端。终端 A 观察变化：
+
+~~~bash
+kubectl -n lab get pods -l app=web -w
 ~~~
 
-负责补副本的叫控制器。它反复比较“当前有几个”和“配置要求几个”，少了就补，多了就删。你只要把期望写清楚，它会继续尝试把现状拉回去。
+终端 B 删除刚查到的第一个 Pod：
 
-## 暂时扩到三个，再恢复
-
-先做一次临时扩容，确认 Ready 数量变成 3/3；然后重新应用课程文件，让副本数回到清单中写的 2。
-
-~~~powershell
-kubectl -n container-course scale deployment/course-api --replicas=3
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course apply -f k8s/20-api.yaml
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course get deployment course-api
+~~~bash
+lab_pod=$(kubectl -n lab get pods -l app=web -o jsonpath='{.items[0].metadata.name}')
+kubectl -n lab delete pod "$lab_pod"
+kubectl -n lab rollout status deployment/web --timeout=120s
 ~~~
 
-这是在本机练习集群中操作。生产环境扩容前要先确认机器容量和数据库连接数；增加 API 副本不会自动增加数据库容量。
+`-w` 持续监听，按 Ctrl+C 退出。你会看到旧名字 Terminating，新名字从 Pending 变成 Running。变量 `lab_pod` 是命令查询到的实际名字，不要把文章里的示例后缀硬抄进去。副本缺少到补齐之间有间隔，镜像拉取失败、资源不足也会阻止恢复，“自愈”不是永不中断。
 
-## 一张图看懂 Deployment 管理谁
+## 扩成三个，再回到两个
 
-Deployment 记住副本数和 Pod 模板；它创建一个 ReplicaSet 来维持指定模板的副本；ReplicaSet 再创建 Pod。删掉一个 Pod 后，由 ReplicaSet 发现数量不足并补一个。通常改 Deployment 清单，不手工去改它下面的 ReplicaSet。
-
-## 新 Pod 没起来时看这里
-
-执行 `kubectl -n container-course get pods`，若状态是 ImagePullBackOff，先查镜像名称和 kind 镜像是否已加载；若是 Pending，运行下面命令看集群给的原因：
-
-~~~powershell
-kubectl -n container-course describe deployment course-api
-kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
-kubectl -n container-course logs deployment/course-api
+~~~bash
+kubectl -n lab scale deployment web --replicas=3
+kubectl -n lab rollout status deployment/web --timeout=120s
+kubectl -n lab get pods -l app=web
+kubectl apply -f basics/deployment.yaml
+kubectl -n lab rollout status deployment/web --timeout=120s
 ~~~
 
-完成练习后确认 Deployment 回到 2/2。课程的 API 副本共用数据库，所以这次删 Pod 不会删数据库记录；只写在容器本地的文件则可能随 Pod 一起消失。
+scale 修改了集群里的期望副本数，文件中仍是 2；重新 apply 文件会把它改回 2。这个实验说明，命令行临时操作和 Git 中配置可能不一致。正式维护时要决定谁拥有副本数字段；后面的 HPA 也会修改它，不应让多个控制工具同时抢着改。
 
-## 参考资料
+## 选择器为什么不能乱改
 
-- [Deployment 管理应用](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
-- [扩展 Deployment](https://kubernetes.io/docs/tasks/run-application/scale-deployment/)
+Deployment 通过选择器辨认它负责的 Pod。`selector.matchLabels` 必须匹配模板标签，且现有 Deployment 的 selector 通常不可更改。不要创建两个选择器互相重叠的控制器，也不要为了改名字随手删生产 Deployment。改模板里的镜像等可更新字段会创建新的 ReplicaSet，原来的历史用于回滚。
+
+~~~bash
+kubectl -n lab get rs
+kubectl -n lab get pod -l app=web -o jsonpath='{range .items[*]}{.metadata.name}{" -> "}{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}{end}'
+~~~
+
+输出能看到 Pod 的 owner 是 ReplicaSet。再 describe 对应 ReplicaSet，可以看到它归属于 Deployment。
+
+## 副本没起来时看哪里
+
+`rollout status` 超时只说明没有完成，不说明具体原因。先 `kubectl -n lab get pods`，再 describe 有问题的 Pod；如果一个 Pod 都没创建，查看 `kubectl -n lab describe rs`，可能是资源配额、准入规则拒绝了 Pod。不要一直删 Deployment 重试，那会丢掉最有用的现场。
+
+本课保留 `web`。后面的 Service、更新和配置实验继续用它；如果之前删过，重新 apply 文件即可恢复到两个基础网页。
+
+## 继续阅读
+
+- [Deployment](https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/deployment/)
+- [ReplicaSet](https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/replicaset/)

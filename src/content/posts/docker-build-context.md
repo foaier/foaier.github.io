@@ -1,82 +1,117 @@
 ---
-title: Docker 构建时的“上下文”是什么？别把整台电脑打包进去
+title: 构建上下文与缓存：最后的点、COPY 和 .dockerignore
 date: '2026-11-24'
-summary: 看懂 build 命令最后的点，写好 .dockerignore，让构建只拿到需要的文件。
+summary: 故意在错误目录构建，修复后观察 CACHED 与代码变化。
 series: Docker 与 Kubernetes
-order: 7
+order: 14
 tags:
-  - Docker 基础
   - Docker
-  - Kubernetes
-level: Docker 基础
+  - Docker 实战
+level: Docker 实战
 prerequisites:
   - dockerfile-first
 goals:
-  - 解释 build context，并通过 .dockerignore 排除构建产物和本地密钥。
+  - 解释文件路径和缓存失效，排除不该打包的文件。
 ---
+`docker build -t web:v1 .` 最后的点很容易被当成标点，其实它在决定 Docker 能读哪些本地文件。这个目录叫构建上下文。Dockerfile 放在哪，和 COPY 能从哪取文件，是两个相关但不同的问题。
 
-Dockerfile 里写 `COPY . .`，第一个点是来源：构建上下文根目录下未被忽略的文件；第二个点是目标：镜像当前 WORKDIR。你站在哪个目录运行命令、`docker build` 最后给了哪个路径，决定 Docker 在构建时看得到什么。
+这节建立独立实验目录，故意让一次 COPY 失败，再用构建日志观察缓存。使用本机 Bash，不需要运行服务。
 
-## 构建能看到的文件有边界
+## 先看目录边界
 
-把 context 想成你交给打包员的一箱材料。Dockerfile 不能随意偷看箱子外面的文件；这既是构建边界，也影响上传到远端 builder 的体积。`.dockerignore` 在发送之前把 bin、obj、Git 历史和 `.env` 等排掉。排除规则写错时，所需源文件也可能不进箱子。
-
-## 用 .dockerignore 缩小上下文
-
-课程示例根目录有 `.dockerignore`。先看看构建日志中的传输上下文大小，再临时把 `**/bin/` 一行注释掉构建一次，与原结果比较。不要真的把密钥文件加进 context；用一个空的练习文件演示排除规则即可。
-
-~~~powershell
-docker build --progress=plain -t container-course-api:context .
-Get-Content .dockerignore
+~~~bash
+mkdir -p ~/docker-practice/context/site
+cd ~/docker-practice/context
+printf 'context lesson\n' > site/index.html
+cat > Dockerfile <<'EOF'
+FROM alpine:3.22
+WORKDIR /app
+COPY site/index.html ./index.html
+CMD ["cat", "/app/index.html"]
+EOF
+docker build --progress=plain -t context-note:v1 .
+docker run --rm context-note:v1
 ~~~
 
-## 从构建输出判断上下文有没有过大
+应输出 context lesson。COPY 的源路径 `site/index.html` 从构建上下文根目录算；目标 `./index.html` 从容器里的 WORKDIR `/app` 算。左边和右边不是同一个文件系统。
 
---no-cache 这次让步骤完整执行，便于观察发送给构建器的 context 大小；输出中的 transferring context 若突然达到几 GB，通常是 bin、obj、.git 或本地文件被一起发送。第二条确认镜像生成。诊断结束后正常构建不必总加 --no-cache。
+## 换一个点的位置，观察失败
 
-~~~powershell
-docker build --no-cache -t container-course-api:context-check .
-docker image inspect container-course-api:context-check --format '{{.Id}}'
+~~~bash
+cd site
+docker build -f ../Dockerfile -t context-note:wrong .
 ~~~
 
-## build 命令末尾那个点到底是什么
+这次应失败，因为上下文变成 site 目录，里面没有 `site/index.html` 这个相对路径。`-f ../Dockerfile` 只选择配方，不会把上下文也改回上一级。回到父目录恢复：
 
-在 docker build -f Dockerfile -t api:dev . 中，最后的点是 build context，也就是 Engine/BuildKit 能用于构建的文件集合；-f 只选择 Dockerfile，不能改变上下文范围。Dockerfile 中 COPY 的源路径相对于上下文，不是相对于 Dockerfile 本身。
-
-~~~text
-docker build -f examples/api/Dockerfile examples/
-                                  ^^^^^^^^^^
-                    只有这个目录能作为 COPY 的源文件范围
+~~~bash
+cd ..
+docker build -f Dockerfile -t context-note:v1 .
 ~~~
 
-如果 Dockerfile 在 examples/api/Dockerfile，而上下文给成 examples/，COPY api/src/ ... 才能命中该路径。把上下文误设成 examples/api/src 时，Dockerfile 同级文件就不在上下文里，会报找不到文件。实际构建时先核对命令最后一个参数。
+这也是很多“文件明明在，COPY 却找不到”的原因。COPY `../secret` 不能用来随意越过上下文边界，Docker 不会让一份配方读取电脑上的任意路径。
 
-## 让上下文变小，也让密钥远离镜像
+## .dockerignore：哪些文件不交给构建
 
-课程的 .dockerignore 会排除版本控制目录、编译输出和本机生成文件。项目可按语言补充 bin/、obj/、node_modules/、测试结果和临时配置；不要把需要编译的源码目录排除掉。生产仓库通常要排除 .env、私钥和本地证书，即使 Dockerfile 没有 COPY 它们，构建上下文也可能被缓存或传给远程 builder。
+在 context 目录创建：
 
-~~~powershell
-docker buildx build --progress=plain --load -t container-course-api:context .
-docker image inspect container-course-api:context --format 'id={{.Id}} size={{.Size}}'
-docker history --no-trunc container-course-api:context
+~~~bash
+cat > .dockerignore <<'EOF'
+.git
+.env
+*.log
+target
+node_modules
+EOF
+docker build --progress=plain -t context-note:v1 .
 ~~~
 
-BuildKit 日志会显示实际传入的上下文大小。改了 .dockerignore 后重新构建，观察上下文上传量是否下降。image history 适合看层和构建命令摘要，但它不是秘密扫描器；如果曾把密钥复制进镜像，删除当前文件也不会从旧层中抹掉，必须轮换密钥并重建。
+作用类似“打包前的排除清单”，可以减少传输，也能减少误把源码仓库、密钥和编译产物复制进镜像的机会。不要误排除真正要 COPY 的文件。
 
-## COPY 缺文件时按路径逐段排查
+试着把 `site` 加进去再构建，应该失败；删掉这一条后恢复。不要把真实密码拿来做实验，写一个假的 `.env` 文件就够了。
 
-先列出构建命令指定的目录，再确认 COPY 源文件位于上下文内、没有被 ignore 规则过滤、大小写与目标平台文件系统一致。不要用 COPY ../secret 把上下文外的文件硬塞进去；BuildKit 会拒绝越界路径，这正是隔离构建输入的保护。
+## 相同输入再次构建，会复用缓存
 
-~~~powershell
-Get-Location
-Get-ChildItem
-Get-Content .dockerignore
-docker buildx build --progress=plain --no-cache --load -t context-debug .
+~~~bash
+docker build --progress=plain -t context-note:v2 .
+printf 'changed page\n' > site/index.html
+docker build --progress=plain -t context-note:v3 .
+docker run --rm context-note:v3
 ~~~
 
---no-cache 只跳过层缓存，不会自动修复路径错误；排查后应去掉它。课程压缩包的 Dockerfile 和 .dockerignore 位于同一目录，从该目录运行命令最不容易弄错上下文。
+第一次相同输入通常能看到 CACHED；修改文件后，相关 COPY 及依赖它的后续步骤要重新执行，容器应输出 changed page。BuildKit 日志里的进度编号不是永久固定的，不要只盯某一个步骤数字。
 
-## 参考资料
+Java 项目常先 COPY pom.xml、下载依赖，再 COPY src、编译应用。这样只改业务源码时，下载依赖这一层更容易复用；先 COPY 整个项目再下载依赖，则一个源码改动也可能使这一步失去缓存。
 
-- [Build context](https://docs.docker.com/build/concepts/context/)
-- [Docker 忽略文件](https://docs.docker.com/build/concepts/context/#dockerignore-files)
+## 缓存不等于永远不更新
+
+| 参数或做法 | 解决什么 | 代价 |
+|---|---|---|
+| 默认缓存 | 相同输入复用以前步骤 | 必须安排基础镜像与依赖更新 |
+| `--no-cache` | 不复用构建步骤缓存 | 耗时更长，不自动保证拉新基础镜像 |
+| `--pull` | 检查基础镜像更新 | 网络与仓库可用性成为条件 |
+| 固定依赖版本 | 减少不可解释的变化 | 仍需主动升级和修复漏洞 |
+
+~~~bash
+docker build --pull --no-cache -t context-note:clean .
+docker image history context-note:clean
+docker system df
+~~~
+
+不要把“所有构建都加 --no-cache”当成标准答案，它会掩盖文件排列不合理的问题。RUN 下载地址对应的远程内容变化，也不一定自动让已有缓存失效。
+
+## 多出来的镜像怎样收尾
+
+先列出本节标签，确认只删除自己的实验结果：
+
+~~~bash
+docker image ls context-note
+docker image rm context-note:v1 context-note:v2 context-note:v3 context-note:clean
+~~~
+
+共享层可能不会立即释放，构建缓存也可能仍在，这是不同对象。`docker builder prune` 会影响当前构建器的其他项目缓存，先看占用和需求，不要在教程里顺手全局清空。
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/build/concepts/context/)
+- [进一步了解相关机制](https://docs.docker.com/build/cache/)

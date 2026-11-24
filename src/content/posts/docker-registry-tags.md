@@ -1,98 +1,106 @@
 ---
-title: 把镜像推到仓库：为什么 latest 不是一个可靠版本号
+title: 镜像仓库：本机 Registry 推拉一遍，再接远程仓库
 date: '2026-11-24'
-summary: 为镜像打版本标签、登录容器仓库并推送，理解 tag 和 digest 的区别。
+summary: 用自己的本地仓库练 tag、push、pull，解释命名、认证和版本。
 series: Docker 与 Kubernetes
-order: 17
+order: 7
 tags:
-  - Docker 实战
   - Docker
-  - Kubernetes
-level: Docker 实战
+  - Docker 入门
+level: Docker 入门
 prerequisites:
-  - docker-compose-operations
+  - docker-layer-cache
 goals:
-  - 把本机镜像推到自己的 registry，并选择可追溯的标签。
+  - 完成本机镜像推拉，能读懂远程仓库地址与标签。
 ---
+镜像只放在本机，另一台服务器自然找不到。交付有两条路：用 save/load 搬文件，或者 push 到镜像仓库再 pull。这一课先在本机完成一次推送和拉取，再说明阿里云等远程仓库该替换哪些参数。
 
-镜像只在你的电脑上时，服务器无从拉取。容器仓库（Registry）就是存放镜像的地方。推送之前要先命名好版本，否则大家都盯着 latest，很难知道某台机器跑的到底是哪一次构建。
+准备：Bash 和 Docker；任意目录可执行。我们把本机仓库绑定到 `127.0.0.1:5000`，只用于学习，不把没有认证的仓库暴露到公网。
 
-## 标签是名字，摘要对应具体内容
-
-`docker tag` 为同一镜像增加一个仓库名称和标签，不会重新编译程序。`push` 上传镜像层。Tag 是可移动的名字，digest 是内容摘要；部署要求可追溯时记录不可变的提交号标签或 digest。公共仓库与私有仓库的认证和访问规则不同。
-
-## 给镜像命名并推送到自己的仓库
-
-下面用 Docker Hub 账号举例。先用变量填自己的用户名，标签用当前版本号。`docker login` 使用交互式凭证输入，不要把密码写进文章、脚本或截图。推送之后从仓库页面或另一台已登录的机器核对标签。
-
-~~~powershell
-$owner = Read-Host 'Docker Hub 用户名'
-$image = "$($owner.ToLowerInvariant())/container-course-api:1.0.0"
-docker build -t container-course-api:1.0.0 .
-docker login --username $owner
-docker tag container-course-api:1.0.0 $image
-docker push $image
-~~~
-
-## 给镜像加唯一标签并核对远端摘要
-
-下面的用户名会在运行时询问；先用有 package 写权限的 GitHub token 登录 GHCR，Docker 会安全地交互式询问 token。tag 只增加本地引用名，push 才上传；最后一条读取仓库平台信息和摘要。
-
-~~~powershell
-$owner = Read-Host 'GitHub 用户名'
-$image = "ghcr.io/$($owner.ToLowerInvariant())/container-course-api:practice-1"
-docker login ghcr.io --username $owner
-docker tag container-course-api:local $image
-docker push $image
-docker buildx imagetools inspect $image
-~~~
-
-## 推送和拉取时每一步发生什么
-
-镜像引用由 Registry 主机、命名空间、仓库和 tag 组成。docker tag 只为本地已有镜像增加一个名字；docker push 按仓库地址上传缺失的层和清单；docker pull 按引用下载清单和当前平台需要的层。私有仓库的认证只影响访问，不会改变镜像内容。
+## 仓库地址、命名空间、标签怎么读
 
 ~~~text
-本机 container-course-api:local
-        | tag，不重新构建
-        v
-ghcr.io/组织/container-course-api:sha-提交号
-        | push
-        v
-Registry manifest + image layers + content digest
+registry.example.com/team/web:1.0
+└── 仓库服务地址 ──┘ └名称─┘ └标签┘
 ~~~
 
-同一个镜像的多个 tag 可能指向相同 digest；同一个可变 tag 以后也可能指向另一个 digest。因此部署清单只写 latest，会让“重新创建”时拿到与昨天不同的内容。
+本机的 `web:1.0`、Docker Hub 的 `用户名/web:1.0`、企业仓库的完整地址，可能指向同一内容的不同名字。tag 只是命名，push 才上传。登录成功也只证明凭据可用，不证明你对某个命名空间有写权限。
 
-## 在 GHCR 做一次带提交号的发布
+## 起一个只允许本机访问的 Registry
 
-在项目根目录执行。先通过组织或账号授权的 GitHub 凭据登录 GHCR，再给当前课程镜像打唯一练习标签。登录时输入的 token 不要写入 shell 命令行或保存到代码库。
-
-~~~powershell
-docker build -t container-course-api:practice .
-docker login ghcr.io --username YOUR_GITHUB_USERNAME
-docker tag container-course-api:practice ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
-docker push ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
-docker buildx imagetools inspect ghcr.io/YOUR_GITHUB_USERNAME/container-course-api:practice-1
+~~~bash
+docker volume create registry-data
+docker run --name registry-lab -d \
+  -p 127.0.0.1:5000:5000 \
+  --mount source=registry-data,target=/var/lib/registry \
+  registry:2
+curl -i http://localhost:5000/v2/
 ~~~
 
-使用 GHCR 前确认包的创建者、可见性和访问权限。组织名和镜像名需改成自己的小写地址；私有包不能匿名拉取。发布成功后保存仓库页面给出的 digest，另一台有拉取权限的机器执行 pull 并核对同一 digest。
+应返回 `200 OK` 和空 JSON。卷挂到 `/var/lib/registry`，这是 registry:2 保存镜像内容的位置。这里先按命令使用命名卷，下一课会用实验解释它如何保留数据。
 
-## 版本标签、digest 和多架构清单
+如果 5000 被占用，将两处 5000 中**左边的主机端口**改成 5001，并把后面的 `localhost:5000` 统一改为 5001。不要关闭其他项目的服务来腾端口。
 
-| 引用 | 方便之处 | 风险或限制 |
-|---|---|---|
-| latest | 人手测试容易输入 | 内容会变化，不能表达确切版本 |
-| 语义版本如 1.2.0 | 便于阅读发布批次 | 若允许覆盖，仍可能漂移 |
-| commit SHA 标签 | 可追溯到源码提交 | 仍要确认仓库没有允许覆盖同名标签 |
-| digest | 固定到具体内容 | 可读性差，更新时必须修改引用 |
+## 打标签、推送、查询、重新拉取
 
-多架构镜像可能有一个 manifest list，分别指向 amd64、arm64 等平台镜像。一个 tag 可能对应不同架构的内容，但平台选择由 manifest 和拉取主机共同决定。若在 ARM 笔记本和 x86 服务器表现不同，先检查镜像 manifest、架构和构建产物，而不是假设 tag 单独说明了每个字节。
+~~~bash
+docker pull nginx:stable-alpine
+docker tag nginx:stable-alpine localhost:5000/lesson-web:v1
+docker push localhost:5000/lesson-web:v1
+curl http://localhost:5000/v2/_catalog
+curl http://localhost:5000/v2/lesson-web/tags/list
+~~~
 
-## CI 推送凭据和运行时拉取凭据分开
+catalog 应包含 `lesson-web`，tags 应包含 `v1`。push 末尾会显示 digest，记录它可以追踪实际发布内容。
 
-CI 需要写仓库包，部署集群通常只需要读私有镜像。给它们不同的身份和权限；不要把开发者的个人长期 token 复制到所有节点。镜像拉取失败时，区分名称错误、包不可见、凭据过期和架构不匹配，再查看 Pod 事件或 Registry 错误码。
+~~~bash
+docker image rm localhost:5000/lesson-web:v1
+docker pull localhost:5000/lesson-web:v1
+docker run --rm localhost:5000/lesson-web:v1 nginx -v
+~~~
 
-## 参考资料
+最后打印 Nginx 版本，说明镜像能从仓库取回来并执行。这里移除的是本地标签，不会删远端镜像，也不会删除原来的 nginx 标签。
 
-- [镜像标签](https://docs.docker.com/docker-hub/repos/manage/hub-images/tags/)
-- [Docker Hub 登录](https://docs.docker.com/reference/cli/docker/login/)
+## 阿里云等远程仓库的步骤相同
+
+在容器镜像服务控制台创建命名空间和仓库，打开仓库的“访问凭证/操作指南”，拿到实际 Registry 地址。下面是**填写真实值后才执行**的模板，不能照搬 example.com：
+
+~~~bash
+REGISTRY=registry.example.com
+NAMESPACE=your-namespace
+REGISTRY_USER=your-account
+docker login "$REGISTRY" --username "$REGISTRY_USER"
+docker tag nginx:stable-alpine "$REGISTRY/$NAMESPACE/lesson-web:v1"
+docker push "$REGISTRY/$NAMESPACE/lesson-web:v1"
+docker logout "$REGISTRY"
+~~~
+
+login 会交互式询问密码或访问令牌，不要把真实密码写在文章、脚本或命令参数里。拉取方也需要自己的读权限。私有镜像可以放在云仓库，是否公开由权限配置决定，并非“云仓库一定公开”。
+
+## 标签不等于发布记录
+
+生产镜像可用版本号或提交号，如 `v1.2.3`、`sha-abc1234`；同名标签被覆盖时，旧服务器未必自动更新。更新必须明确 pull 新镜像、重建容器、检查应用，并保留回滚版本。
+
+| 报错 | 优先检查 |
+|---|---|
+| denied / unauthorized | 登录账号、命名空间、推送权限 |
+| manifest unknown | 完整名称和标签是否存在 |
+| HTTP response to HTTPS client | 仓库协议和证书配置 |
+| connection refused | Registry 是否运行、映射端口是否正确 |
+
+localhost 仓库是本机 HTTP 实验。正式跨机器部署应配置 HTTPS 和认证，不要通过给任意地址加 insecure-registries 或关闭 TLS 校验来掩盖配置问题。
+
+## 结束实验时留下什么
+
+~~~bash
+docker stop registry-lab
+docker rm registry-lab
+docker volume inspect registry-data
+~~~
+
+镜像数据仍在卷里。需要继续练就按前面的 run 命令重新挂同一卷；确认不再需要仓库内容时，才执行 `docker volume rm registry-data`。容器、镜像标签、仓库数据三者的生命周期不同。
+
+## 继续阅读
+
+- [命令与配置说明](https://distribution.github.io/distribution/about/deploying/)
+- [进一步了解相关机制](https://docs.docker.com/reference/cli/docker/image/push/)

@@ -10,9 +10,9 @@
 
 ## Docker 与 Kubernetes 学习路线
 
-访问 `/containers/` 按顺序学习 42 篇 Docker 和 Kubernetes 教程。路线用同一个 ASP.NET Core API + PostgreSQL 案例，包含命令、预期结果、练习、排错与官方延伸资料；本地集群练习使用 kind。
+访问 `/containers/` 学习 24 篇 Docker 教程和 31 篇 Kubernetes 教程。Docker 从基础概念、命令讲解开始，包含 Nginx/Tomcat、MySQL、Redis、Dockerfile、Java + Compose、主从复制、Redis 集群、Portainer、监控与 Actions 实验。Kubernetes 从 kind 集群和 Nginx 开始，逐步练习对象、探针、存储、权限、网络、监控、日志、kubeadm、备份恢复与 GitOps，最后完成 ASP.NET Core API + PostgreSQL 综合实验。整条路线使用 Bash。
 
-课程源码位于 `examples/container-course/`。`npm run container:pack` 会从这些源码、Docker/Compose 配置和 Kubernetes 清单生成 `public/downloads/container-course.zip`；构建时自动执行。压缩包不包含编译产物、课程外密钥或本地数据。
+Docker 源码位于 `examples/docker-labs/`，Kubernetes 分课实验位于 `examples/k8s-labs/`，综合项目位于 `examples/container-course/`。`npm run container:pack` 生成三个同名 ZIP，放在 `public/downloads/`；构建时自动执行。压缩包不包含编译产物、课程外密钥或本地数据。
 
 ## 本地开发
 

@@ -1,82 +1,144 @@
 ---
-title: 副本能自动调吗？HPA 也得先看 Metrics API 和容量上限
+title: HPA 怎么扩容：先有 requests，再用压力把副本拉起来
 date: '2026-11-24'
-summary: 理解 HPA 的指标依赖，以及 Pod 扩容与节点扩容的区别。
+summary: 运行 CPU 消耗服务，安装 HPA，持续施压观察扩容，再停压观察稳定窗口与缩容。
 series: Docker 与 Kubernetes
-order: 38
+order: 48
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
   - k8s-observability
+  - k8s-resources
 goals:
-  - 检查 Metrics API 与 HPA，并设计有数据库容量约束的扩缩容策略。
+  - 运行 CPU 消耗服务，安装 HPA，持续施压观察扩容，再停压观察稳定窗口与缩容。
 ---
+“CPU 到 50% 就加副本”里，50% 到底相对什么？基于 CPU utilization 的 HPA 通常看实际 CPU 使用量相对 requests 的百分比。请求 100m，平均用了 50m，就是 50%，不是整台服务器 CPU 的 50%。
 
-给 API 多加几个副本不难，难的是高峰时及时扩、低峰时平稳收回，而且新副本能处理更多工作。HPA 是起点，不是让集群无成本无限增长的开关。
+## 开始前必须有资源指标
 
-## 扩副本之前先弄清指标和容量
+上一课已安装 Metrics Server。先确认数据正常，否则 HPA 显示 `<unknown>` 时加再多压力也无法正确计算。
 
-HorizontalPodAutoscaler 根据 CPU、内存或自定义指标调整 Deployment 副本数。CPU 百分比基于 requests 计算；Metrics Server 不在场时资源指标目标就不可用。队列长度等业务信号需专门的 metrics adapter。
-
-新增 Pod 没有节点可放，扩容仍会 Pending。Cluster Autoscaler 或云节点自动供给是另一层，需要云权限、配额和预算。横向扩容还要约束数据库连接池、状态共享与最大副本数。
-
-## 检查 Metrics API 是否真的可用
-
-先只读检查当前 Metrics API、HPA 和 API requests。kind 默认通常没有 Metrics Server，所以这节不创建一个看起来能运行却没有指标的 HPA。动态练习需要在独立集群里安装与其 Kubernetes 版本兼容的指标服务。
-
-~~~powershell
-kubectl get apiservices v1beta1.metrics.k8s.io
+~~~bash
+kubectl config use-context kind-course
 kubectl top nodes
-kubectl -n container-course get hpa
-kubectl -n container-course get deployment course-api -o jsonpath="{.spec.template.spec.containers[0].resources.requests}"
+kubectl get apiservice v1beta1.metrics.k8s.io
 ~~~
 
-## 指标可用之后，跑一次真正的扩缩容
+HPA 调的是工作负载副本，不会自动买服务器。节点装不下新增 Pod 时仍会 Pending，节点自动扩缩容是另一套机制。内存泄漏也不会靠加副本得到根治。
 
-先按 Metrics Server 官方兼容表安装到独立练习集群，直到 kubectl top pods -n container-course 能读到数值。若 kubelet 证书校验失败，应按集群证书和地址配置排查；不要把关闭 TLS 校验当成生产标准配置。
+## 创建一个有 CPU 工作量的演示服务
 
-课程包已提供 labs/hpa.yaml，目标是 API，最少 2 个副本、最多 4 个、CPU 平均利用率目标 60%，缩容观察窗口为 300 秒。当前 API CPU request 为 50m，因此 60% 对应每副本平均 30m，而不是宿主机总 CPU 的 60%。这是演示值，真正上线需重新做容量估计。
+使用 Kubernetes 演示镜像；它处理请求时计算，便于观察 CPU 变化。它不是业务生产镜像。
 
-~~~powershell
-kubectl apply -f labs/hpa.yaml
-kubectl -n container-course get hpa course-api -w
-# 看完按 Ctrl+C，查看条件与事件
-kubectl -n container-course describe hpa course-api
+~~~yaml file=autoscaling/app.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: cpu-web}
+  template:
+    metadata:
+      labels: {app: cpu-web}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/hpa-example:latest
+          ports:
+            - {name: http, containerPort: 80}
+          resources:
+            requests: {cpu: 100m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  selector: {app: cpu-web}
+  ports:
+    - {port: 80, targetPort: http}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cpu-web
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
 ~~~
 
-简化估算为：目标副本数 = 向上取整（当前副本数 × 当前平均利用率 ÷ 目标利用率）。例如两个副本当前平均 120%，目标 60%，粗算就是 4 个副本。实际控制器还会考虑容差、尚未就绪的 Pod、缺失指标和伸缩行为，不能要求每个采样点都完全符合这个算式。
-
-要产生一点课程负载，可启动下面的集群内临时客户端，只请求不依赖数据库的根路径；另一个终端观察 HPA。实验限制十分钟，结束后主动删除客户端。
-
-~~~powershell
-kubectl -n container-course run course-load --image=busybox:1.37 --restart=Never --command -- sh -c 'end=$(( $(date +%s) + 600 )); while [ $(date +%s) -lt $end ]; do wget -q -O /dev/null http://course-api/; done'
-kubectl -n container-course get hpa,pods
-kubectl -n container-course delete pod course-load
+~~~bash
+kubectl apply -f autoscaling/app.yaml
+kubectl -n lab rollout status deployment/cpu-web --timeout=180s
+kubectl -n lab get hpa cpu-web
+kubectl -n lab describe hpa cpu-web
 ~~~
 
-单个客户端不保证把 CPU 压到阈值。没扩容时先看实际指标：利用率没有超过目标，保持原副本数才是正常行为。停止负载后也不会立刻缩容，稳定窗口就是用来减少抖动的。
+第一次要等待采样。教学镜像沿用它公开的 latest 标签，正式应用应记录镜像 digest；若新架构无法拉取，先看镜像平台和事件，不要误诊为 HPA 算法问题。
 
-练完删除 HPA，再恢复 YAML 中的副本数。HPA 存在期间别反复 apply 含固定 replicas 的 Deployment，避免两个来源轮流改数量。
+## 开四个临时客户端持续施压
 
-~~~powershell
-kubectl -n container-course delete hpa course-api
-kubectl apply -f k8s/20-api.yaml
+~~~bash
+for i in 1 2 3 4; do
+  kubectl -n lab run "load-$i" --image=busybox:1.37 --labels=purpose=hpa-load --restart=Never -- sh -c 'while true; do wget -qO- http://cpu-web >/dev/null; done'
+done
+kubectl -n lab get hpa cpu-web -w
 ~~~
 
-## 观察 HPA 如何逐步调整副本
+看 TARGETS 从低值上升，REPLICAS 可能逐步增加到上限。不同电脑和负载速度会影响结果，不保证固定几秒后恰好是 5。按 Ctrl+C 只停止观察，不会停止负载 Pod。
 
-HPA 根据指标周期性地调整 Deployment 副本，不会立即响应每个请求。下面持续观察 HPA 和 Pod 数量，看到变化后按 Ctrl+C；若指标显示未知，先修 Metrics API 与 CPU requests。
-
-~~~powershell
-kubectl -n container-course get hpa course-api --watch
-kubectl -n container-course get pods -l app=course-api --watch
+~~~bash
+kubectl -n lab get deployment cpu-web
+kubectl top pods -n lab -l app=cpu-web
+kubectl -n lab describe hpa cpu-web
 ~~~
 
-## 参考资料
+HPA 的基础估算类似“当前副本数 × 当前平均值 / 目标值”再取整，实际还有容忍区间、未就绪 Pod、缺失指标、稳定窗口和扩缩速率处理，不能只套一条乘法解释所有结果。
 
-- [HPA](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/)
-- [自动伸缩概念](https://kubernetes.io/docs/concepts/workloads/autoscaling/)
-- [Metrics Server](https://github.com/kubernetes-sigs/metrics-server)
+## 停压，观察为什么不会立刻缩回去
+
+~~~bash
+kubectl -n lab delete pod -l purpose=hpa-load
+kubectl -n lab get hpa cpu-web -w
+~~~
+
+本例缩容稳定窗口设为 60 秒，加上指标采样与控制周期，通常需要再等一段时间。生产默认窗口和策略应按业务抖动调整，避免流量一波动就频繁增删实例。稳定窗口不是精确倒计时。
+
+## 扩不起来时先查这些
+
+`<unknown>` 查 Metrics Server、requests 和 HPA conditions；desired 增加但 Pod Pending 查节点容量；达到 maxReplicas 仍慢查瓶颈是否在数据库、锁或外部服务。HPA 接管后，持续 apply 带固定 replicas 的文件可能把规模改回去，GitOps 也要避免争抢这个字段。
+
+完成观察后按 Ctrl+C，再清理：
+
+~~~bash
+kubectl -n lab delete pod -l purpose=hpa-load --ignore-not-found
+kubectl delete -f autoscaling/app.yaml
+~~~
+
+自动扩容要结合压测和业务指标，不是给配置加一段 HPA 就完成容量规划。
+
+## 继续阅读
+
+- [HPA](https://kubernetes.io/zh-cn/docs/tasks/run-application/horizontal-pod-autoscale/)
+- [HPA 实战](https://kubernetes.io/zh-cn/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/)

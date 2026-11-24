@@ -1,0 +1,122 @@
+name: redis-cluster-lab
+services:
+  r1:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.11"]
+    volumes:
+      - r1-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.11
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r2:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.12"]
+    volumes:
+      - r2-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.12
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r3:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.13"]
+    volumes:
+      - r3-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.13
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r4:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.14"]
+    volumes:
+      - r4-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.14
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r5:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.15"]
+    volumes:
+      - r5-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.15
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r6:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.16"]
+    volumes:
+      - r6-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.16
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r7:
+    image: redis:7.4-alpine
+    profiles: [grow]
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.17"]
+    volumes:
+      - r7-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.17
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+  r8:
+    image: redis:7.4-alpine
+    profiles: [grow]
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--cluster-announce-ip", "172.30.99.18"]
+    volumes:
+      - r8-data:/data
+    networks:
+      cluster:
+        ipv4_address: 172.30.99.18
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 15
+networks:
+  cluster:
+    ipam:
+      config:
+        - subnet: 172.30.99.0/24
+volumes:
+  r1-data:
+  r2-data:
+  r3-data:
+  r4-data:
+  r5-data:
+  r6-data:
+  r7-data:
+  r8-data:

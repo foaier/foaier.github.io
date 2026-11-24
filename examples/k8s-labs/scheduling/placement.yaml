@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: placed-web
+  namespace: lab
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: placed-web}
+  template:
+    metadata:
+      labels: {app: placed-web}
+    spec:
+      nodeSelector:
+        disk: fast
+      containers:
+        - name: nginx
+          image: nginx:1.28-alpine
+          resources:
+            requests: {cpu: 50m, memory: 32Mi}

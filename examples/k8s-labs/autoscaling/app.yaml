@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: cpu-web}
+  template:
+    metadata:
+      labels: {app: cpu-web}
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/hpa-example:latest
+          ports:
+            - {name: http, containerPort: 80}
+          resources:
+            requests: {cpu: 100m, memory: 32Mi}
+            limits: {cpu: 500m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  selector: {app: cpu-web}
+  ports:
+    - {port: 80, targetPort: http}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cpu-web
+  namespace: lab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cpu-web
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60

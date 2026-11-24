@@ -1,0 +1,8 @@
+.env
+*.env
+*-password.txt
+backups/
+**/target/
+*.tar
+*.zip
+.idea/

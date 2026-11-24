@@ -1,0 +1,8 @@
+backups/
+scratch/
+kind-logs/
+audit-debug/
+.env
+*.key
+*.db
+*.dump

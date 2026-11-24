@@ -1,105 +1,97 @@
 ---
-title: 集群升级和 etcd 备份：控制面维护前先想能不能恢复
+title: 备份不能只看文件存在：etcd 快照恢复与升级顺序
 date: '2026-11-24'
-summary: 从 etcd 角色、版本偏差和节点排空讲清集群维护的前后条件。
+summary: 保存 kind 集群的 etcd 快照，在隔离容器中恢复并查询对象，再梳理 kubeadm 升级时的检查与回退边界。
 series: Docker 与 Kubernetes
-order: 40
+order: 53
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
-  - k8s-helm-kustomize
+  - k8s-architecture
+  - k8s-kubeadm
 goals:
-  - 检查集群版本信息并形成升级检查单，分清 etcd 与业务数据库备份。
+  - 保存 kind 集群的 etcd 快照，在隔离容器中恢复并查询对象，再梳理 kubeadm 升级时的检查与回退边界。
 ---
+etcd 保存集群对象状态，包括 Deployment、Service、Secret 等；它不保存镜像层，也不保存 PostgreSQL 数据卷里的业务数据。做了 etcd 快照，不能宣称数据库数据已经有备份。
 
-升级 Kubernetes 不是把一个版本号改掉这么简单。控制面组件、节点、客户端和插件各有兼容范围；etcd 快照又关乎集群 API 状态。先确认谁托管、谁备份，再排维护窗口。
+## 先写一条可验证的标记
 
-## 控制面和业务数据各自需要恢复方案
+回到电脑 Bash，在 `k8s-labs` 根目录，确认 context 是 kind-course。本课读取实际运行的 etcd 镜像版本，恢复使用同一镜像，不随便下载另一个大版本。
 
-etcd 保存 Kubernetes 集群对象状态，不保存课程 PostgreSQL 里的 visits。备份 etcd 不等于备份应用卷和数据库。kubeadm 管理者按受支持的版本路径检查 API 弃用、备份并验证还原，再逐步维护控制面和节点；托管服务则遵循厂商升级与责任边界。
+~~~bash
+kubectl config use-context kind-course
+kubectl -n lab create configmap backup-proof --from-literal=message=snapshot-contains-this --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n kube-system get pod etcd-course-control-plane
+lab_etcd_image=$(kubectl -n kube-system get pod etcd-course-control-plane -o jsonpath='{.spec.containers[0].image}')
+printf '%s\n' "$lab_etcd_image"
+mkdir -p backups
+~~~
 
-版本偏差策略限制 API Server、kubelet、kubectl 和控制器的组合，不能跨很多版本跳升。cordon/drain 会影响可用性，还受 PodDisruptionBudget、DaemonSet 和存储影响。kind 的 Docker 节点不是 kubeadm 多节点环境，不做生产升级命令。
+快照可能含 Secret，backups 目录已从下载包和 Git 忽略。不要上传快照到公开仓库，也不要把它当成普通示例附件。
 
-## 先收集版本和节点信息
+## 保存在线快照并拷到电脑
 
-只收集当前版本和节点信息，不执行升级。真实 kubeadm 变更要由集群管理员按目标版本官方步骤操作；托管集群还要读服务商对控制面、插件和节点池的支持说明。
+~~~bash
+kubectl -n kube-system exec etcd-course-control-plane -- etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key snapshot save /var/lib/etcd/lesson-snapshot.db
+docker cp course-control-plane:/var/lib/etcd/lesson-snapshot.db ./backups/lesson-snapshot.db
+docker run --rm --entrypoint etcdutl -v "$PWD/backups:/backup:ro" "$lab_etcd_image" snapshot status /backup/lesson-snapshot.db --write-out=table
+~~~
 
-~~~powershell
+etcdctl 通过 HTTPS 连接当前成员；etcdutl 查看离线快照。kind 节点把 /var/lib/etcd 挂给 etcd Pod，所以可以从节点容器 docker cp 取文件，避开精简 etcd 镜像没有 tar 导致 kubectl cp 失败的问题。看到 revision、键数量等信息说明文件可识别，还没证明能恢复。
+
+## 恢复到隔离数据卷，不覆盖正在运行的集群
+
+先确认没有以前留下的同名恢复容器和卷。若有，先判断是否还需要，不要直接覆盖。以下创建的是独立实验资源：
+
+~~~bash
+docker ps -a --filter name=course-etcd-check
+docker volume ls --filter name=course-etcd-restore
+docker volume create course-etcd-restore
+docker run --rm --entrypoint etcdutl -v "$PWD/backups:/backup:ro" -v course-etcd-restore:/restore "$lab_etcd_image" snapshot restore /backup/lesson-snapshot.db --data-dir=/restore/data --name=restore --initial-cluster=restore=http://127.0.0.1:2380 --initial-advertise-peer-urls=http://127.0.0.1:2380
+docker run -d --name course-etcd-check -v course-etcd-restore:/restore --entrypoint etcd "$lab_etcd_image" --name=restore --data-dir=/restore/data --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 --listen-peer-urls=http://127.0.0.1:2380 --initial-advertise-peer-urls=http://127.0.0.1:2380 --initial-cluster=restore=http://127.0.0.1:2380
+~~~
+
+恢复目录必须为空，重复运行会拒绝已有数据目录。容器没有 `-p` 映射，且只监听其内部回环地址；它不会成为当前 Kubernetes 的新 etcd 成员，也不会接管生产状态。
+
+## 查询恢复的对象，才算完成这次演练
+
+~~~bash
+docker exec course-etcd-check etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
+kubectl -n lab delete configmap backup-proof
+docker exec course-etcd-check etcdctl --endpoints=http://127.0.0.1:2379 get /registry/configmaps/lab/backup-proof --count-only
+kubectl -n lab get configmap backup-proof
+~~~
+
+恢复容器应健康，键数量应为 1；当前集群查询 ConfigMap 则 NotFound。两者共同说明：旧快照确实含标记，恢复的是过去状态。这里验证到 etcd 数据恢复，没有完成整套控制平面灾难切换；实际恢复还涉及 API Server 指向、证书、加密配置、成员关系和 revision 处理。
+
+~~~bash
+docker stop course-etcd-check
+docker rm course-etcd-check
+docker volume rm course-etcd-restore
+~~~
+
+本机快照保留用于查看，实验结束后按自己的备份保留策略删除。真实备份还需要异地保存、加密、保留周期、恢复演练频率和明确的 RPO/RTO。
+
+## 升级要按层，而不是所有节点一起 apt upgrade
+
+kubeadm 集群通常先升级控制平面上的 kubeadm，运行 upgrade plan，升级控制平面，再逐节点排空、升级 kubelet/kubectl、重启 kubelet、恢复调度。跨小版本升级必须遵守版本偏差策略，不能一次跳多个小版本；先核对 CNI、CSI、入口和 CRD/webhook 的兼容性。
+
+在上一课虚拟机控制平面上，先做只读检查：
+
+~~~bash
+kubeadm version -o short
 kubectl version
-kubectl get nodes -o wide
-kind version
-kubectl get pods -A -o wide
+sudo kubeadm certs check-expiration
+sudo kubeadm upgrade plan
+kubectl get nodes
 ~~~
 
-## 为什么三台控制面也不能同时重启两台
+真正升级的目标版本必须从 plan 和所选仓库确认，再按相应版本步骤执行，不把文章中的示例版本盲目覆盖到真实集群。worker 维护时使用上一课的 cordon/drain/PDB 流程，确认业务恢复后再处理下一台。
 
-etcd 需要多数成员同意才能提交写入。3 个成员要至少 2 个在线，能容忍 1 个故障；5 个成员要至少 3 个在线，能容忍 2 个。成员增加也会增加通信成本，并不是越多越好。跨很远的网络部署会把写入延迟和网络抖动带进控制面。
+“回退 apt 包”不是完整回退方案：API 存储版本、etcd、插件和业务迁移可能已经变化。升级前应明确能否回退，必要时用重建集群与迁移方式恢复，并在测试集群走完一遍。
 
-已有应用可能还在跑，但 etcd 无法达成多数时，新的 API 状态写入、调度和故障恢复会受影响。这就是维护通常逐个节点进行的原因：升级一台，确认健康，再处理下一台。不要把“容器还在服务”误认为控制面也能正常工作。
+## 继续阅读
 
-## 备份恢复要分成两份作业
-
-| 要恢复什么 | 保存什么 | 如何验证 |
-| --- | --- | --- |
-| 集群对象状态 | etcd 一致性快照、对应版本与集群配置 | 检查快照，再在隔离恢复环境验证 API 对象 |
-| PostgreSQL 业务记录 | 数据库逻辑或物理备份、必要的 WAL 与恢复参数 | 恢复到另一个数据库，查业务记录与时间点 |
-
-etcdctl 负责通过网络和服务通信；较新版本使用 etcdutl 处理快照文件检查、离线恢复等工作。工具版本要匹配 etcd 支持要求。看到一个 .db 文件、文件大小不为零，都不等于已经验证它能恢复。
-
-快照可能含 Secret 等集群敏感状态，所以要加密、限制读取权限、做异地保留。还原应遵循当前 etcd 的灾备指南，包含成员配置及 Kubernetes watch 缓存相关的 revision 处理；这部分不能用另一套集群的目录和证书硬套。
-
-## PDB 管的是主动驱逐，不是停电保险
-
-课程包的 labs/pdb.yaml 为两个 API 副本声明 minAvailable: 1。它限制遵守 Eviction API 的主动驱逐，节点断电、内核崩溃并不会先询问 PDB。Deployment 自己的滚动发布还要靠 maxUnavailable/maxSurge 管理，PDB 不能替它决定发布策略。
-
-~~~powershell
-kubectl apply -f labs/pdb.yaml
-kubectl -n container-course get pdb course-api
-kubectl -n container-course describe pdb course-api
-kubectl -n container-course delete pdb course-api
-~~~
-
-两个 API 都健康时通常允许一次驱逐；只有一个健康时可能显示 0。单节点 kind 不做 drain 演练：两个副本放在同一台机器，数量够了也不具有跨节点故障容错能力。真正维护前还要检查副本分布和数据库所在节点。
-
-## 升级前筛出 Pending 工作负载和控制面组件
-
-版本清单和 Ready 节点状态已在前面的命令确认。升级前再检查 Pending Pod 与控制面组件状态；任何异常都先记录和处理。etcd 备份、升级和恢复命令要按集群发行版执行，kind 的容器节点不能照搬生产步骤。
-
-~~~powershell
-kubectl get pods -A --field-selector=status.phase=Pending -o wide
-kubectl -n kube-system get pods -o wide
-~~~
-
-## 快照成功后至少还要检查什么
-
-etcd 备份要和集群 ID、版本、成员拓扑、证书与恢复说明一起保存。快照文件存在且大小合理，只能证明写出了文件；离线检查快照状态，再在隔离环境恢复并验证关键 API 对象，才说明恢复路径大致可行。还原不是在运行中的集群上覆盖一个文件，必须遵循对应 etcd 与 Kubernetes 的官方灾备步骤。
-
-在 kubeadm 自建集群中，管理员常使用 etcdctl 从本机 TLS endpoint 读取快照，再用兼容版本的 etcdutl 检查文件。下面是命令形态说明，不可原样粘贴：endpoint、CA、client certificate、私钥路径必须按你自己的 kubeadm 静态 Pod 配置确认；托管集群应使用云厂商快照和恢复流程。
-
-~~~~bash
-ETCDCTL_API=3 etcdctl \
-  --endpoints=https://127.0.0.1:2379 \
-  --cacert=/path/to/etcd-ca.crt \
-  --cert=/path/to/etcd-client.crt \
-  --key=/path/to/etcd-client.key \
-  snapshot save /secure-backup/etcd-$(date +%F-%H%M).db
-
-etcdutl snapshot status /secure-backup/etcd-YYYY-MM-DD-HHMM.db --write-out=table
-~~~~
-
-把敏感证书放进 shell 历史或把快照放在同一控制面磁盘上，都会削弱备份价值。快照应加密并存到隔离位置，按保留期轮换；恢复环境需记录 exact Kubernetes/etcd 版本和数据目录策略。
-
-## 节点升级时一次只推进一个故障域
-
-升级前确认版本偏差和插件兼容，确保剩余节点能承载当前 requests。维护一个节点时，先 cordon 阻止新 Pod 调度，再按 PDB 和 DaemonSet 情况 drain，完成节点升级并验证 kubelet、CNI、CSI 和业务请求后再继续下一台。单节点 kind 不适合练 drain，因为它没有可承接 Pod 的备用节点。
-
-PDB 保护 Eviction API 路径中的自愿中断，不是机器故障保险；节点数量不足、PDB 配成 minAvailable 等于当前副本数时，drain 可能一直被阻止。不要使用 --disable-eviction 绕过保护，除非经过变更审批并明确承受中断。
-
-## 参考资料
-
-- [etcd 运维](https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/)
-- [kubeadm 升级](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/)
-- [版本偏差策略](https://kubernetes.io/releases/version-skew-policy/)
+- [etcd 灾难恢复](https://etcd.io/docs/v3.6/op-guide/recovery/)
+- [kubeadm 升级集群](https://kubernetes.io/zh-cn/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/)

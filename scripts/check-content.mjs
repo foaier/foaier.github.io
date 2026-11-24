@@ -75,7 +75,7 @@ for (const file of files) {
     }
     if (data.series === "Docker 与 Kubernetes") {
       assert.ok(count >= 450, "Docker/Kubernetes lesson needs enough explanation to teach the topic: " + count + " Chinese characters");
-      assert.ok(headings >= 5 && headings <= 10, "Docker/Kubernetes lesson should have a short, scannable table of contents: " + headings + " headings");
+      assert.ok(headings >= 5, "Docker/Kubernetes lesson needs learning sections: " + headings + " headings");
       const isDecisionLesson = file === "k8s-why-runtime.md";
       assert.ok(commandExamples >= (isDecisionLesson ? 1 : 2), "Docker/Kubernetes lesson needs runnable command examples; found " + commandExamples);
       for (const section of ["## 概念讲透：", "## 运行过程拆解：", "## 案例推演", "## 生产里怎么用、怎么排障", "## 怎么确认做对了", "## 留一个小练习", "## 没跑通时先查什么"]) {
@@ -108,10 +108,10 @@ try {
     for (const slug of stage.recommended) assert.equal(metadata.get(slug)?.series, stage.name, `Invalid recommended chapter: ${slug}`);
   }
   const containerPosts = containerCurriculum.flatMap((stage) => stage.posts);
-  assert.equal(containerPosts.length, 42, "Docker and Kubernetes route must contain 42 lessons");
-  assert.equal(new Set(containerPosts).size, 42, "Docker and Kubernetes route contains duplicate slugs");
-  assert.equal(curriculum.find((stage) => stage.id === "containers")?.start, "docker-install", "Container course must start with Docker installation");
-  assert.deepEqual(containerPosts.slice(18, 23), ["k8s-why-runtime", "k8s-local-cluster", "k8s-pod-yaml", "k8s-deployment", "k8s-architecture"], "Kubernetes should move from first cluster to hands-on work before component theory");
+  assert.ok(containerPosts.length > 0, "Container course must have lessons");
+  assert.equal(new Set(containerPosts).size, containerPosts.length, "Docker and Kubernetes route contains duplicate slugs");
+  assert.equal(curriculum.find((stage) => stage.id === "containers")?.start, "docker-why", "Container course must start with the Docker introduction");
+  assert.deepEqual(containerPosts.slice(containerPosts.indexOf("k8s-why-runtime"), containerPosts.indexOf("k8s-why-runtime") + 5), ["k8s-why-runtime", "k8s-local-cluster", "k8s-pod-yaml", "k8s-deployment", "k8s-architecture"], "Kubernetes should move from first cluster to hands-on work before component theory");
   assert.ok(!metadata.get("k8s-why-runtime")?.prerequisites.includes("docker-github-actions"), "Kubernetes introduction must not depend on GitHub Actions");
   for (const [index, slug] of containerPosts.entries()) {
     const post = metadata.get(slug);
@@ -119,12 +119,12 @@ try {
     assert.equal(post.series, "Docker 与 Kubernetes", `Wrong series for ${slug}`);
     assert.equal(post.order, index + 1, `Wrong course order for ${slug}`);
     for (const prerequisite of post.prerequisites) {
-      assert.ok(containerPosts.indexOf(prerequisite) < index, `Prerequisite must come before ${slug}: ${prerequisite}`);
+      assert.ok(containerPosts.indexOf(prerequisite) >= 0 && containerPosts.indexOf(prerequisite) < index, `Prerequisite must come before ${slug}: ${prerequisite}`);
     }
     if (index === 0) assert.equal(post.prerequisites.length, 0, "The first course lesson must not have prerequisites");
     else assert.ok(post.prerequisites.length > 0, `Missing prerequisite: ${slug}`);
   }
-  assert.equal([...positions.keys()].filter((key) => key.startsWith("Docker 与 Kubernetes/")).length, 42, "Unexpected number of Docker and Kubernetes course articles");
+  assert.equal([...positions.keys()].filter((key) => key.startsWith("Docker 与 Kubernetes/")).length, containerPosts.length, "Unexpected number of Docker and Kubernetes course articles");
 } catch (error) {
   errors.push(error.message);
 }

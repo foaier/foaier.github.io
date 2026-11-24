@@ -1,85 +1,136 @@
 ---
-title: CPU 500m、内存 256Mi 是什么意思？把 requests 和 limits 算明白
+title: requests 和 limits：为什么 Pod Pending，为什么会 OOM
 date: '2026-11-24'
-summary: 区分调度资源承诺、CPU 限流与内存 OOM，避免凭感觉填资源。
+summary: 通过 CPU 请求过大和内存超限两次实验，分清调度、限流、OOM、QoS、默认限制和命名空间配额。
 series: Docker 与 Kubernetes
-order: 27
+order: 34
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
   - k8s-probes
 goals:
-  - 读取课程资源配置，并从事件区分 Pending、CPU throttling 与 OOMKilled。
+  - 通过 CPU 请求过大和内存超限两次实验，分清调度、限流、OOM、QoS、默认限制和命名空间配额。
 ---
+“服务器还有空闲，为什么 Pod 仍然 Pending？”经常是因为 scheduler 按 requests 做资源预算，而不是看这一秒 CPU 有多闲。requests 是资源请求，limits 是运行时上限，两者不能混成“分配的资源”。
 
-服务在开发机飞快，放进 Pod 后突然慢了；还有一种情况是看着 CPU 不忙，Pod 却总重启。先别急着加机器，检查资源声明。requests 和 limits 不是两个随便抄来的数字，它们影响不同环节。
+## CPU 和内存的单位
 
-## 把 requests 与 limits 的作用分开
+`100m` CPU 是 0.1 核，`1000m` 是 1 核；它不是独占绑定某个核心。`128Mi` 内存是 128 × 1024 × 1024 字节，和十进制的 M 不同。CPU 超过限制通常被限流，响应变慢；内存超限可能被 OOM 杀掉。requests 太低会过度装箱，太高又会让 Pod 排不进去。
 
-CPU 的 1000m 等于一个 CPU 核心的计算时间份额，50m 是 0.05 核。内存 Mi 是二进制单位，与十进制 M 不同。调度器主要依据 requests 判断节点是否放得下；运行时的内存 limit 超出后可能被 OOM 杀死，CPU limit 通常表现为限流变慢。
+## 先制造一个无法满足的 CPU 请求
 
-课程 API request 为 50m 与 96Mi，内存 limit 为 256Mi，只是小实验起点，没有宣称适合生产。资源可用量还要扣掉系统与节点预留。应用容器自己报的工作集、进程指标和节点内存压力也要结合看。
-
-## 查看实际资源声明和退出原因
-
-先读取已部署的资源声明，再检查 Pod Events、上次退出状态。`kubectl top` 需要 metrics-server；没安装时返回 Metrics API not available 不说明应用已经坏了，自动伸缩章节会说明这层依赖。
-
-~~~powershell
-kubectl -n container-course get deployment course-api -o yaml
-kubectl -n container-course get pods -l app=course-api
-$coursePod = kubectl -n container-course get pod -l app=course-api -o jsonpath="{.items[0].metadata.name}"
-kubectl -n container-course describe pod $coursePod
-kubectl top pods -n container-course
+~~~yaml file=resources/pending.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-pending
+  namespace: lab
+spec:
+  containers:
+    - name: pause
+      image: busybox:1.37
+      command: ["sleep", "3600"]
+      resources:
+        requests: {cpu: "1000", memory: 16Mi}
 ~~~
 
-## 把资源申请和节点余量放在一起看
-
-Pod 资源清单说明调度器预留多少 CPU 和内存；节点详情能看到可分配容量。OOMKilled 事件出现时，再对照 requests、limits 和实际峰值，不要只为消除告警盲目加大限制。
-
-~~~powershell
-kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,CPU_REQUEST:.spec.containers[0].resources.requests.cpu,MEMORY_REQUEST:.spec.containers[0].resources.requests.memory'
-kubectl describe nodes
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~bash
+kubectl apply -f resources/pending.yaml
+kubectl -n lab get pod cpu-pending
+kubectl -n lab describe pod cpu-pending
+kubectl describe node course-worker
 ~~~
 
-## requests 和 limits 分别参与不同决策
+这里故意请求一千核，不是一千毫核。普通电脑无法满足，Events 会出现 Insufficient cpu；节点 describe 中的 Allocatable 和 Allocated resources 能帮助理解预算。删除文件里的一个零并不是严谨修复，要根据程序实际需求设置合理 requests。此实验直接删除坏 Pod，避免长期占着排错列表。
 
-requests 是调度器放置 Pod 时用于估算资源需求的声明，也影响节点上的资源预留和超卖判断；它不代表容器持续占用同等 CPU。CPU limit 是运行时可用 CPU 时间上限，过低时程序会被 throttling；memory limit 是内存上限，越界时容器可能被 OOMKilled。
-
-| 资源字段 | 主要作用 | 超出或不足时常见现象 |
-|---|---|---|
-| requests.cpu | 调度和资源记账 | 可用节点装不下时 Pod Pending |
-| limits.cpu | 限制 CPU 时间 | 延迟上升、CPU throttling |
-| requests.memory | 调度和节点资源预留判断 | 资源紧张时影响驱逐优先级 |
-| limits.memory | 容器内存硬边界 | OOMKilled、重启次数增加 |
-
-一个 Pod 里多个容器的 requests 会合并参与调度。节点还要留资源给系统守护进程、kubelet、网络和存储插件，因此 allocatable 才是工作负载可申请的主要参考，不是机器总内存。
-
-## 把三个常见状态与资源字段对应起来
-
-- Pending 且事件有 Insufficient cpu/memory：调度器找不到满足 requests 和约束的节点。
-- Running 但响应慢：检查 CPU limit 是否造成节流，同时看应用等待和下游服务。
-- OOMKilled：容器超过 memory limit 或节点内存压力导致终止；扩大 limit 前先确定是正常峰值、内存泄漏还是读入数据过大。
-
-~~~powershell
-kubectl -n container-course describe pod -l app=course-api
-kubectl -n container-course top pods --containers
-kubectl describe nodes
-kubectl get events -A --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~bash
+kubectl -n lab delete pod cpu-pending
 ~~~
 
-kubectl top 需要 Metrics API；若显示 Metrics API not available，先检查 Metrics Server，不要据此判定应用没有 CPU。describe node 的 Allocated resources 显示 requests/limits 的汇总，能看出节点是否已经被声明得很满。
+## 再制造内存超限，识别退出原因
 
-## QoS 等级会影响节点压力下的驱逐顺序
+~~~yaml file=resources/oom.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-demo
+  namespace: lab
+spec:
+  restartPolicy: Never
+  containers:
+    - name: allocator
+      image: python:3.13-alpine
+      command: ["python", "-c", "import time; x=bytearray(256*1024*1024); time.sleep(60)"]
+      resources:
+        requests: {cpu: 50m, memory: 16Mi}
+        limits: {cpu: 200m, memory: 64Mi}
+~~~
 
-Kubernetes 根据 Pod 内所有容器的请求和限制计算 QoS：Guaranteed 要求每个容器的 CPU、内存 requests 与 limits 都设置且相等；BestEffort 没有请求和限制；其他一般属于 Burstable。QoS 影响节点资源压力下的处理优先级，但不等同于应用 SLA，也不会阻止 OOM。
+~~~bash
+kubectl apply -f resources/oom.yaml
+kubectl -n lab get pod memory-demo -w
+~~~
 
-不要机械地把 limits 全设成很高或与 requests 完全相等。先测实际峰值、基线和并发，给节点系统组件留余量，再逐步调整并观察 throttling、OOM 和 Pending。生产容量还要按故障时剩余节点数计算，而不是只看平时平均 CPU。
+容器尝试申请 256 MiB，而上限 64 MiB，通常会显示 OOMKilled。按 Ctrl+C，再读取状态：
 
-## 参考资料
+~~~bash
+kubectl -n lab get pod memory-demo -o jsonpath='{.status.containerStatuses[0].state.terminated.reason}{"\n"}'
+kubectl -n lab describe pod memory-demo
+kubectl -n lab delete pod memory-demo
+~~~
 
-- [资源管理](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/)
-- [节点压力驱逐](https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/)
+退出码 137 只表示进程被 SIGKILL，不能单凭它认定内存泄漏；这里要结合 OOMKilled、限制和实验行为。真实程序要看工作集、缓存、堆外内存和流量变化，不能无限加 limit。
+
+## QoS 是分类，不是永不被驱逐的等级
+
+所有容器都没有 CPU/内存 requests 和 limits，通常是 BestEffort；所有容器 CPU、内存请求与上限都齐全且分别相等，符合 Guaranteed 条件；其余通常是 Burstable。节点压力驱逐还会考虑优先级、是否超过请求等因素，不能只按 QoS 三个词猜测驱逐顺序。
+
+## LimitRange 和 ResourceQuota 各管哪一层
+
+LimitRange 可以给容器补默认值、限制单个请求范围；ResourceQuota 约束整个 namespace 的总量。放到单独的实验 namespace，避免配额影响后续 web：
+
+~~~yaml file=resources/quota.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: quota-lab
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: defaults
+  namespace: quota-lab
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 32Mi}
+      default: {cpu: 200m, memory: 128Mi}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: budget
+  namespace: quota-lab
+spec:
+  hard:
+    pods: "2"
+    requests.cpu: "500m"
+    requests.memory: 256Mi
+    limits.memory: 512Mi
+~~~
+
+~~~bash
+kubectl apply -f resources/quota.yaml
+kubectl -n quota-lab create deployment demo --image=nginx:1.28-alpine --replicas=3
+kubectl -n quota-lab get pods
+kubectl -n quota-lab describe rs
+kubectl -n quota-lab describe quota budget
+~~~
+
+最多两个 Pod 被允许创建，ReplicaSet 事件会出现 exceeded quota；不是第三个 Pod 一直 Pending，因为创建请求已经被拒绝。看不到第三个 Pod 时，去 describe ReplicaSet 才能找到原因。完成后 `kubectl delete namespace quota-lab`，这只清理本课专用 namespace。
+
+## 继续阅读
+
+- [管理容器资源](https://kubernetes.io/zh-cn/docs/concepts/configuration/manage-resources-containers/)
+- [资源配额](https://kubernetes.io/zh-cn/docs/concepts/policy/resource-quotas/)

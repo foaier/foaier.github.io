@@ -1,92 +1,95 @@
 ---
-title: 容器里的配置怎么传？环境变量方便，但密钥不能随便写
+title: 配置怎么进容器：环境变量、env 文件与文件型密码
 date: '2026-11-24'
-summary: 区分镜像构建时变量、容器运行配置和真正的秘密管理。
+summary: 修改同一个镜像的首页文案，再验证 MySQL 的密码文件配置。
 series: Docker 与 Kubernetes
-order: 11
+order: 16
 tags:
-  - Docker 实战
   - Docker
-  - Kubernetes
+  - Docker 实战
 level: Docker 实战
 prerequisites:
-  - docker-ports
+  - docker-production-image
 goals:
-  - 用运行时环境变量配置数据库连接，并指出把密码写进镜像的风险。
+  - 正确注入配置，理解重建容器与数据库改密的差别。
 ---
+同一个镜像，开发环境说 hello，测试环境说 welcome，不应该为这点差异重新改源码打包。运行配置可以在创建容器时传入；密码也属于配置，但保存和分发方式需要更谨慎。
 
-同一个镜像，测试环境连测试数据库，线上环境连正式数据库。若每换环境都重新编译、重新做镜像，发布就容易失控。镜像尽量不带环境专属配置，运行时再把地址和开关传进去。
+准备：已经构建 `foaier-java:lesson`，使用本机 Bash。只改首页文案，不需要运行数据库。
 
-## 环境变量怎样变成 .NET 配置
+## -e：把一个值传给程序
 
-Compose 的 `environment` 会在创建容器时设置环境变量，ASP.NET Core 会把 `ConnectionStrings__Default` 映射到配置树。这个办法适合演示和普通非敏感配置。密码同样作为普通环境变量传递时，可能被有权限的人通过 inspect、运维面板或诊断日志看见。ARG、ENV、源码里的字符串也不适合存真正的密钥。
-
-## 查看课程 API 实际收到的配置
-
-从这一课开始使用下载包自带的 Compose 文件，下一节再详细拆解它。先停掉前面占用 8080 的单独 API 容器。课程使用虚构本地密码，只观察配置怎样传给程序；不要同时修改数据库初始化配置。已有数据卷不会因为 POSTGRES_USER 或 POSTGRES_DB 改了就自动创建新用户、新数据库。
-
-~~~powershell
-docker compose config
-docker compose up -d --wait
-docker compose exec api printenv ConnectionStrings__Default
+~~~bash
+docker run --name config-note -d -p 127.0.0.1:8089:8080 \
+  -e DEMO_MESSAGE=hello-from-environment foaier-java:lesson
+docker logs --tail 20 config-note
+curl http://localhost:8089/
 ~~~
 
-## 确认容器仍在运行，再看应用启动日志
+等应用启动后，首页 message 应变成 hello-from-environment。Docker 只是把变量放进进程环境，真正读取它的是 application.properties 的 `demo.message=${DEMO_MESSAGE:hello-docker}`。其他软件不一定认识这个名字。
 
-本地练习可以检查服务状态和最近日志，但不要把连接串或密码直接打印到终端截图里。出现数据库认证错误时，用 readiness 和数据库日志确认问题，不要用完整环境变量证明密码存在。
+`-e KEY=value` 中有空格时给整体加引号，例如 `-e 'DEMO_MESSAGE=hello learner'`。Java 代码不会因为变量名叫某个名字就自动生效，要有对应配置读取逻辑。
 
-~~~powershell
-docker compose ps api db
-docker compose logs --tail 30 api db
+## env 文件让参数不挤成一长行
+
+~~~bash
+mkdir -p ~/docker-practice/config
+cd ~/docker-practice/config
+cat > demo.env <<'EOF'
+DEMO_MESSAGE=loaded-from-file
+EOF
+docker rm -f config-note
+docker run --name config-note -d -p 127.0.0.1:8089:8080 \
+  --env-file ./demo.env foaier-java:lesson
 ~~~
 
-## 配置、环境变量和密钥不是同一种东西
+等日志显示启动完成后再请求首页，应读到 loaded-from-file。env 文件每行写 KEY=value，不是 shell 脚本，不需要 export；复杂的引号和替换规则不要按 Bash 想当然处理。
 
-配置决定程序按什么业务参数运行，例如日志级别、服务地址和功能开关；密钥用于证明身份，例如数据库密码、签名密钥和访问令牌。环境变量只是一种传递渠道，不会因为名字叫 PASSWORD 就自动加密。docker inspect 可能显示容器配置中的环境变量，日志也可能意外打印它们。
+改 demo.env 后只执行 restart，已有容器环境不会重新按 run 参数创建。应重建容器或使用应用自己支持的配置刷新能力。
 
-| 方式 | 适合什么 | 更新后通常是否需要重建容器 |
-|---|---|---|
-| 镜像内默认值 | 安全且不随环境变化的默认配置 | 需要构建新镜像 |
-| Compose environment | 本机或部署环境注入非秘密配置 | 需要重新创建容器让进程读取 |
-| 挂载配置文件 | 文件型配置，应用能按约定读取 | 文件可能更新；应用是否热加载由应用决定 |
-| Secret 文件或外部秘密系统 | 凭据、证书和令牌 | 取决于挂载方式和应用重载能力 |
+## ARG、ENV、运行变量分别在哪生效
 
-课程 Compose 为了让读者本机可复现，密码写的是公开的 course-local-only。这只是演示数据，绝不能作为生产密码。仓库、镜像层、构建参数和截图中都不要放真实密钥。
+| 方式 | 谁用 | 何时设置 | 适合什么 |
+|---|---|---|---|
+| Dockerfile ARG | 构建步骤 | `build --build-arg` | 非秘密构建选项 |
+| Dockerfile ENV | 后续构建和运行环境 | 构建镜像时 | 镜像默认值 |
+| `run -e` / `--env-file` | 容器进程 | 创建容器时 | 环境差异与运行配置 |
+| 挂载配置文件 | 能读取文件的应用 | 启动/应用重载时 | 多行配置、文件型凭据 |
 
-## 看 Compose 实际会注入什么，但不要泄露输出
+不应该把生产密码写进 Dockerfile，再指望后面 RUN rm 删除干净。历史层和构建记录仍可能留下内容。构建确实需要令牌时使用 BuildKit secret mount 等专门机制，并确保命令不把值写进产物或日志。
 
-Compose 会在创建容器时把 environment 值交给应用。它不是一个自动轮换秘密的平台。若检查最终展开配置，输出可能含有真实值，不要把完整结果贴到公开工单。
+## 文件型秘密不是“随便挂上就会读”
 
-~~~powershell
-docker compose config --services
-docker compose ps
-docker compose exec api printenv ASPNETCORE_HTTP_PORTS
-docker compose exec api printenv ConnectionStrings__Default
+MySQL 官方镜像支持 `MYSQL_ROOT_PASSWORD_FILE`，可以从挂载文件读取初始化密码；Spring Boot 示例当前读取的是 DB_PASSWORD 环境变量，并没有自动实现 `_FILE` 约定。
+
+下面是一个**独立的本机 MySQL 实验**，仍在本节目录执行，文件不进 Git：
+
+~~~bash
+printf 'local-file-password' > mysql-password.txt
+chmod 600 mysql-password.txt
+docker volume create secret-mysql-data
+docker run --name secret-mysql -d \
+  --mount type=bind,source="$PWD/mysql-password.txt",target=/run/secrets/mysql-password,readonly \
+  --mount source=secret-mysql-data,target=/var/lib/mysql \
+  -e MYSQL_ROOT_PASSWORD_FILE=/run/secrets/mysql-password mysql:8.4
+docker logs --tail 30 secret-mysql
 ~~~
 
-第二个变量在本地课程中包含演示密码，只能在自己的终端验证，不能截图或分享输出。生产排错优先确认变量是否存在、引用名是否一致；可以比较长度或配置键名，不必把密钥值写入日志。
+等初始化完成后 `docker exec -it secret-mysql mysql -uroot -p`，输入文件中的教学密码可以登录。这里没有发布主机端口，练习通过 exec 进入。密码文件更新不会自动改掉已初始化的数据库账户密码。
 
-## 用 Compose secret 文件表达“只给需要它的服务”
+## 配置出错怎么验证、怎么收尾
 
-Compose 的 secrets 可以把指定文件只挂载给声明使用它的服务，容器内通常从 /run/secrets/secret-name 读取。它能减少环境变量和镜像层暴露面，但本地 Compose 文件来源的 secret 不等于云端加密保管库；主机文件权限、备份和部署平台仍要保护好。
+可以用 `docker exec config-note printenv DEMO_MESSAGE` 查看非秘密变量。不要把完整 inspect/config 输出直接贴到公开问题里，它们可能包含密码。线上应从部署平台受保护的配置注入，并限制能操作 Docker 的人。
 
-~~~~yaml
-services:
-  api:
-    secrets:
-      - db_password
-secrets:
-  db_password:
-    file: ./secrets/db_password.txt
-~~~~
+~~~bash
+docker rm -f config-note
+docker stop secret-mysql
+docker rm secret-mysql
+~~~
 
-此片段用于解释结构，课程 Compose 目前仍用演示环境变量连接数据库；如果要改成文件形式，API 程序必须同步支持读取该路径。不要只改 YAML 就假设应用会自动读取 /run/secrets。
+本机文件与 secret-mysql-data 卷仍保留。确认没有需要的数据后再单独删卷和密码文件。轮换真实密码至少包含数据库改密、应用更新、连接恢复验证和旧凭据失效，不能只改一个 env 文本就结束。
 
-## 密钥轮换要包含应用重载和旧凭证失效
+## 继续阅读
 
-轮换不是把文件改掉就结束。通常要先生成新凭据、更新秘密来源、让服务安全地重新加载、验证新连接，然后让旧凭据失效。数据库密码轮换还需协调应用副本和数据库账户；若应用无法热加载，更新配置后应滚动重建容器并确认新进程已使用新值。
-
-## 参考资料
-
-- [ASP.NET Core 配置](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/configuration/)
-- [Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/)
+- [命令与配置说明](https://docs.docker.com/reference/cli/docker/container/run/)
+- [进一步了解相关机制](https://docs.docker.com/build/building/secrets/)

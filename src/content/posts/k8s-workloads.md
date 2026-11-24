@@ -1,78 +1,145 @@
 ---
-title: Deployment、StatefulSet、Job、DaemonSet，到底该选谁
+title: 不同任务用不同控制器：DaemonSet、Job 和 CronJob
 date: '2026-11-24'
-summary: 按服务、固定身份、一次性任务和每节点代理区分工作负载控制器。
+summary: 分别运行每节点任务、一次性计算和定时作业，学习完成状态、重试、超时以及幂等处理。
 series: Docker 与 Kubernetes
-order: 30
+order: 37
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
-  - k8s-storage
+  - k8s-deployment
+  - k8s-pod-lifecycle
 goals:
-  - 为常见任务选择合适的控制器，并运行一个可重复清理的 Job。
+  - 分别运行每节点任务、一次性计算和定时作业，学习完成状态、重试、超时以及幂等处理。
 ---
+网页需要长期运行，Deployment 合适；导出报表需要运行后结束，用 Deployment 就可能被一遍遍拉起来。选择控制器之前先问：程序应该一直活着，还是完成工作就退出？是否要求每台节点都有一份？
 
-不是所有程序都适合“永远保持两个副本”。发一批账单的脚本应跑完退出；采集节点日志的代理希望每台节点各一个；有固定节点身份的服务又需要稳定编号。控制器选错，最常见的结果是完成的脚本被无限重启。
+## 四类工作先分清
 
-## 按程序的运行方式选择控制器
+| 控制器 | 目标 | 例子 |
+| --- | --- | --- |
+| Deployment | 维持一组可替换的副本 | 无状态 API、网页 |
+| DaemonSet | 在符合条件的节点上运行副本 | 日志采集、节点代理 |
+| Job | 达到指定成功完成次数 | 数据导入、一次性计算 |
+| CronJob | 按时间表创建 Job | 定时报表、定期清理 |
 
-Deployment 适合能替换副本的长期服务。StatefulSet 提供稳定 Pod 名字、顺序与卷声明等机制，但不会替 PostgreSQL 配主从复制或选主。DaemonSet 通常覆盖符合条件的每个节点。Job 追求任务成功完成；CronJob 定时创建 Job。
+StatefulSet 留到下一课，处理稳定身份和逐副本存储。HPA 是调整规模的控制器，不是用来替代这些工作负载的另一种容器类型。
 
-Job 遇到失败会重试，定时任务可能延迟或重复，所以业务逻辑仍要保证幂等。数据库迁移任务尤其要防多个副本同时修改 schema，不能把“只声明一个 Job”当成绝对只执行一次的承诺。
+## 在每个工作节点放一个观察进程
 
-## 运行一个做完就退出的 Job
-
-用官方 BusyBox 镜像创建一次性任务。只打印一句话，不操作数据库。先运行下面命令，完成后查看日志与状态，再删除这个 Job。CronJob 可先读概念，不必为了演示创建一个会不停运行的后台任务。
-
-~~~powershell
-$context = kubectl config current-context
-if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在课程 kind-course 创建练习 Job" }
-kubectl -n container-course create job course-once --image=busybox:1.37 -- /bin/sh -c "echo course-job-done"
-kubectl -n container-course wait --for=condition=complete job/course-once --timeout=120s
-kubectl -n container-course logs job/course-once
-kubectl -n container-course get job course-once
-kubectl -n container-course delete job course-once
+~~~yaml file=workloads/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-note
+  namespace: lab
+spec:
+  selector:
+    matchLabels: {app: node-note}
+  template:
+    metadata:
+      labels: {app: node-note}
+    spec:
+      containers:
+        - name: note
+          image: busybox:1.37
+          command: ["sh", "-c", "echo running-on-$NODE_NAME; sleep 86400"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
 ~~~
 
-## 运行一次 Job 并查看任务输出
-
-apply 创建 Job，Job 控制器创建 Pod 并追踪完成状态；get 同时查看任务和执行实例；logs 读取结果。要重跑同名 Job，先删除后重新 apply。任务可能重试，真实业务需用幂等键保护外部副作用。
-
-~~~powershell
-kubectl apply -f k8s/os-check.yaml
-kubectl -n container-course get jobs,pods
-kubectl -n container-course logs job/os-check
+~~~bash
+kubectl apply -f workloads/daemonset.yaml
+kubectl -n lab rollout status daemonset/node-note --timeout=120s
+kubectl -n lab get pods -l app=node-note -o wide
+kubectl -n lab logs -l app=node-note --prefix
 ~~~
 
-## 控制器选型要看“要维持什么”
+三节点 kind 通常在两个 worker 上各有一个，控制平面有污点，不一定也运行。DaemonSet 并非无条件忽略所有污点；是否运行仍取决于选择条件、容忍和资源。
 
-| 工作负载 | 它维持或执行什么 | 适合的任务 |
-|---|---|---|
-| Deployment | 一组可替换的无状态副本 | API、Web 服务 |
-| StatefulSet | 有稳定序号与网络身份的副本 | 需要稳定身份的状态服务 |
-| DaemonSet | 每个符合条件的节点运行一个副本 | 节点日志、监控代理 |
-| Job | 直到成功完成指定次数 | 数据迁移、批处理 |
-| CronJob | 按时间表创建 Job | 定时清理、对账任务 |
+## 一个会成功结束的 Job
 
-StatefulSet 不会自动把数据库变成高可用集群；它提供稳定的 Pod 身份和卷关联，复制协议、选主、备份仍需数据库本身或 Operator 实现。DaemonSet 也不等于“每台物理机必有一个”，节点选择、污点容忍和系统约束都会影响覆盖范围。
-
-## CronJob 不是精确到秒的定时器
-
-CronJob 按 schedule 创建 Job，但控制器协调、集群负载和时钟会带来延迟；长时间任务可能与下一次调度重叠。concurrencyPolicy 可设 Allow、Forbid 或 Replace，但业务仍应能处理重复执行。startingDeadlineSeconds 和历史 Job 保留数量用于控制延迟补跑与对象清理。
-
-~~~powershell
-kubectl -n container-course create cronjob clock-lab --image=busybox:1.36 --schedule='*/2 * * * *' -- /bin/sh -c 'date; echo scheduled-run'
-kubectl -n container-course get cronjob
-kubectl -n container-course get jobs --watch
+~~~yaml file=workloads/job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: count-demo
+  namespace: lab
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 60
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: counter
+          image: busybox:1.37
+          command: ["sh", "-c", "for n in 1 2 3; do echo item-$n; done"]
 ~~~
 
-等待下一次两分钟边界触发，按 Ctrl+C 结束 watch，再查看 Job 日志。实验结束后按对象名清理：kubectl -n container-course delete cronjob clock-lab；删除 CronJob 默认不会自动删除已创建的历史 Job，需先查看 jobs，再逐个确认清理。
+~~~bash
+kubectl apply -f workloads/job.yaml
+kubectl -n lab wait --for=condition=Complete job/count-demo --timeout=90s
+kubectl -n lab logs job/count-demo
+kubectl -n lab get jobs,pods
+~~~
 
-## 参考资料
+日志应有 item-1 到 item-3，Pod 是 Completed，不是异常退出。backoffLimit 限失败重试，activeDeadlineSeconds 限总运行时间，TTL 让完成后的对象在一段时间后清理。没有日志归集时清理太快会影响排错。
 
-- [工作负载](https://kubernetes.io/docs/concepts/workloads/controllers/)
-- [Job](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
-- [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
+## 每分钟运行一次，且不重叠
+
+~~~yaml file=workloads/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: clock
+  namespace: lab
+spec:
+  schedule: "*/1 * * * *"
+  timeZone: Asia/Shanghai
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: clock
+              image: busybox:1.37
+              command: ["sh", "-c", "date; echo report-finished"]
+~~~
+
+~~~bash
+kubectl apply -f workloads/cronjob.yaml
+kubectl -n lab get cronjobs
+kubectl -n lab create job clock-manual --from=cronjob/clock
+kubectl -n lab wait --for=condition=Complete job/clock-manual --timeout=120s
+kubectl -n lab logs job/clock-manual
+~~~
+
+手工触发能立即验证模板，不必等一分钟。Forbid 阻止同一 CronJob 的计划任务重叠，不会阻止你另外手动创建 Job；timeZone 决定调度时区，容器内 date 的显示时区可以不同。
+
+## 定时任务不能假设绝对只执行一次
+
+调度延迟、重试、控制器恢复可能带来漏执行或重复执行风险。扣款、发券、结算要用业务唯一键、事务或幂等记录兜住，不能因为 CronJob 名字里有 Cron 就相信“每分钟恰好一次”。Job 的成功退出码只证明进程报告成功，业务验收仍要检查目标数据。
+
+~~~bash
+kubectl -n lab patch cronjob clock --type=merge -p '{"spec":{"suspend":true}}'
+kubectl delete -f workloads/cronjob.yaml -f workloads/daemonset.yaml
+kubectl -n lab delete job clock-manual count-demo --ignore-not-found
+~~~
+
+暂停只阻止后续计划，不中止已创建 Job。删除 CronJob 通常级联删除所属 Job；手工任务单独清理。若修改 Job 模板时提示 immutable，创建一个新名字的 Job，不要强行修改已经运行的任务。
+
+## 继续阅读
+
+- [Job](https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/job/)
+- [CronJob](https://kubernetes.io/zh-cn/docs/concepts/workloads/controllers/cron-jobs/)

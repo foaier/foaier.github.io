@@ -1,82 +1,117 @@
 ---
-title: 让 GitHub Actions 自动构建和发布 Docker 镜像
+title: GitHub Actions 实战：提交 Java 代码，自动构建发布镜像
 date: '2026-11-24'
-summary: 用代码提交触发 CI，编译 API、构建镜像，再发布带提交号的 GHCR 标签。
+summary: 在自己的仓库安装示例工作流，检查分支、权限、镜像标签与拉取验收。
 series: Docker 与 Kubernetes
-order: 18
+order: 24
 tags:
-  - Docker 实战
   - Docker
-  - Kubernetes
-level: Docker 实战
+  - Docker 进阶
+level: Docker 进阶
 prerequisites:
-  - docker-registry-tags
+  - docker-monitoring
 goals:
-  - 看懂仓库中的容器发布工作流，并从 Pull Request/主分支区分构建与发布。
+  - 用提交号发布镜像，区分构建成功与部署成功。
 ---
+手工 build、tag、push 都做过以后，可以把它们交给 GitHub Actions。这里继续使用 Java 实验项目：每次推送 main 时构建镜像并发布到 GHCR，Pull Request 只检查能否构建。
 
-本机 `docker build` 成功，不代表同事电脑上也能重现。把构建命令放进 GitHub Actions 后，每个 Pull Request 都能在干净 Runner 上重新编译和打镜像；合并到主分支才上传到仓库。CI 负责验证和产物，直接连生产服务器部署还要额外做好凭证与回滚设计。
+这一课需要自己的 GitHub 账号与仓库。没有账号也可以先读流程，Docker 入门和后面的 Kubernetes 本地实验不以这一步为前提。
 
-## 从一次代码提交到一个镜像
+## 准备一个独立仓库
 
-`container-course.yml` 先 checkout，再安装 .NET 10、build API、设置 Buildx，然后用 metadata action 生成提交标签。Workflow 给 job `packages: write`，通过短期 `GITHUB_TOKEN` 登录 GHCR。Pull Request 的 `push` 为 false，只做构建；main 才上传镜像。没有把 SSH 私钥塞进仓库，也没有未经确认改你的服务器。
+把[Docker 实验包](/downloads/docker-labs.zip)里的 docker-labs 目录作为新仓库根目录：根目录应有 java-app、compose.yaml、workflows。不要把实验嵌套到别的目录后仍照抄路径。
 
-## 对照工作流检查构建输入
+文件里的教学密码仅用于本地，不要把真实凭据带入仓库。创建 GitHub 仓库时不额外初始化 README，以免第一次推送产生两套提交历史。以下在自己的新目录运行，远端地址换成自己的：
 
-在[仓库里查看完整 workflow](https://github.com/foaier/foaier.github.io/blob/main/.github/workflows/container-course.yml)，对照触发条件、权限、登录、tag 和 build-push。只有整站根目录 README 的更改不会触发它，`examples/container-course/` 下的代码和 README 都会。下面的本地命令在课程源码目录运行。
-
-~~~powershell
-# 在本地验证与 CI 相同的构建输入
-dotnet build src/ContainerCourse.Api/ContainerCourse.Api.csproj --configuration Release
-docker build -t container-course-api:ci .
+~~~bash
+cd ~/docker-labs
+git init -b main
+git add .
+git commit -m "Add Docker learning sample"
+git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_REPOSITORY.git
 ~~~
 
-## 看镜像实际包含哪些构建步骤
+此时还没有推送。先补工作流，保证文件路径正确。
 
-本地构建和镜像检查已在主练习完成。image history 可以看到镜像记录的构建层，帮助你判断是否把 SDK、源码或不必要的文件带进最终镜像；CI 通过仍需另做部署后健康检查。
+## 把示例工作流放到 GitHub 识别的位置
 
-~~~powershell
-docker image history --no-trunc container-course-api:ci
-docker image ls container-course-api:ci
+~~~bash
+mkdir -p .github/workflows
+cp workflows/java-image.yml .github/workflows/java-image.yml
+cat .github/workflows/java-image.yml
 ~~~
 
-## 这条工作流实际分成两种权限
+工作流已经随下载包提供。它包含 checkout、Buildx、登录 GHCR、生成镜像名、build-push 五步。关键部分如下，完整文件以包内为准：
 
-课程工作流应有两条路径：Pull Request 和手动验证负责编译、构建镜像但不登录仓库；受保护的 main 分支 push 才获得 packages: write 并发布 GHCR。把“只在步骤上跳过登录”当成安全隔离不够，因为同一个 job 的 GITHUB_TOKEN 权限由 job 级 permissions 决定。
-
-~~~text
-pull_request / 手动运行
-  -> 编译源码 -> 构建镜像 -> 不登录、不 push
-
-push 到 main
-  -> 编译源码 -> buildx -> 使用短期 GITHUB_TOKEN 登录
-  -> 发布 sha-<commit> 和 main 分支的 latest
+~~~yaml
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 ~~~
 
-工作流触发条件中的 paths 是节省 CI 资源的过滤器，不是访问控制。发布 job 还应明确限制事件类型和分支，并只给它真正需要的权限。workflow_dispatch 从非 main 分支手动启动时可以验证构建，但不应发布。
+packages:write 用来推镜像，身份来自本次工作流的 GITHUB_TOKEN，不需要在源码写长期个人密码。来自 fork 的 PR 令牌通常只有受限权限，这份流程在 PR 上不登录也不推送。
 
-## 读懂一次绿色运行后仍要检查什么
+## 看懂构建路径与镜像标签
 
-当前示例会执行 .NET 编译、构建 OCI 镜像并使用 BuildKit GitHub Actions cache；它没有单元测试项目，所以不能把 dotnet build 描述成“测试通过”。如果将来加测试项目，应加入 dotnet test 并在构建镜像之前运行。绿勾只表示定义的步骤成功，仍需核对仓库包的标签、digest、可见性和构建提交。
-
-从日志分别检查：Runner 上使用了哪次提交；Buildx 用的上下文和 Dockerfile；metadata-action 生成了哪些标签；push 是否真的执行；最后写入了哪个 digest。PR 构建镜像成功但 GHCR 没有新 tag，是正确的安全行为。
-
-## 修改工作流后如何安全地验证
-
-先在分支里检查 YAML 结构、路径过滤和 permissions；提交后开 Pull Request，观察它只能运行验证路径；合并到 main 后观察发布路径。不要为了测试把个人 token 写进仓库，也不要用 pull_request_target 加载不可信 PR 代码。
-
-~~~powershell
-git diff --check
-git diff -- .github/workflows/container-course.yml
+~~~yaml
+- uses: docker/build-push-action@v6
+  with:
+    context: ./java-app
+    push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    tags: ${{ steps.image.outputs.tag }}
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
 ~~~
 
-Actions 日志里若出现 denied，先确认发布 job 是否来自 main push，以及 GITHUB_TOKEN 是否有 packages:write。若 PR job 发生权限问题，不要给所有 job 增权；先判断它是否应该拥有该权限。
+context 必须对应包含 pom.xml、src、Dockerfile 的目录。镜像名按 `ghcr.io/账号/仓库:完整提交号` 生成，工作流会把仓库名转成小写。提交号标签让你能找到这次镜像来自哪个版本；用 latest 作为唯一标记，回滚时就容易失去依据。
 
-## 从镜像发布到部署仍然隔着一个验收环节
+GHA 缓存帮助后续构建减少重复步骤，不意味着可以跳过编译验收。镜像构建成功也没有验证 MySQL、Redis 联调，那是另一项测试任务。
 
-此工作流只构建和发布镜像，不会 SSH 登录服务器，也不会更新 Kubernetes。把 CI、制品发布和部署拆开，部署方以 digest 更新声明式清单，再检查 rollout、readiness 和业务请求。这样能分辨“镜像发布成功”和“服务运行成功”。
+## 提交推送，按步骤读 Actions 日志
 
-## 参考资料
+~~~bash
+git add .github/workflows/java-image.yml
+git commit -m "Build and publish Java image"
+git push -u origin main
+~~~
 
-- [Docker 官方 GitHub Actions 指南](https://docs.docker.com/build/ci/github-actions/)
-- [GitHub Actions 工作流语法](https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions)
+进入仓库 Actions，打开 Build Java Docker lesson。先看 checkout，再看 Buildx 和构建日志，最后看是否 push 成功。绿色构建并不自动证明发布：PR 或手工触发按本示例只构建，只有 push 到 main 才发布。
+
+在仓库关联的 Packages 查看镜像版本。新包可能是 private，另一台机器需要登录或按你的需求调整包可见性，不能靠猜标签就绕过权限。
+
+## 在本机拉取这次产物
+
+从 Actions 日志复制真实镜像地址，替换下面的值后执行。不要把示例提交号照搬：
+
+~~~bash
+IMAGE=ghcr.io/your-account/your-repository:actual-commit-sha
+docker login ghcr.io
+docker pull "$IMAGE"
+docker run --name ci-java -d -p 127.0.0.1:8094:8080 "$IMAGE"
+docker logs --tail 30 ci-java
+~~~
+
+登录时用具备读取该包权限的凭据。等应用启动后访问 `http://localhost:8094/health/live`，应是 alive；没有配置数据库时 ready 仍会失败，与 Java 镜像课一致。
+
+正式部署还要注入运行配置、验证依赖、处理数据库迁移、设置回滚。CI 推镜像与生产 CD 部署是两件事，不能把“Actions 绿了”当作用户已经可访问。
+
+## 出错时别先换一整套工作流
+
+Dockerfile 找不到，检查 context 路径；Maven 依赖错误看构建步骤第一条异常；GHCR denied 查 packages 权限、组织策略和包所属仓库；工作流没有运行查它是否提交在 `.github/workflows`，以及事件是否匹配分支。
+
+~~~bash
+docker rm -f ci-java
+docker logout ghcr.io
+~~~
+
+这份 Java 发布工作流放在实验包里，供读者复制到自己的仓库。博客站点本身继续由已有 Pages 工作流发布，不需要为了学 Docker 把简历或博客一起塞进镜像。
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/build/ci/github-actions/)
+- [进一步了解相关机制](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)

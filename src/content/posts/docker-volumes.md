@@ -1,93 +1,98 @@
 ---
-title: 删掉容器，数据库数据会不会一起没？先搞懂 Volume 和目录挂载
+title: 数据卷与目录挂载：删容器、读文件、只读共享都试一次
 date: '2026-11-24'
-summary: 用 named volume 保留 PostgreSQL 数据，并比较 bind mount 的用途。
+summary: 用文本文件亲自验证数据是否保留，再区分 Volume 和 bind mount。
 series: Docker 与 Kubernetes
-order: 12
+order: 8
 tags:
-  - Docker 实战
   - Docker
-  - Kubernetes
+  - Docker 实战
 level: Docker 实战
 prerequisites:
-  - docker-config-secrets
+  - docker-registry-tags
 goals:
-  - 验证删容器后命名卷仍在，并有意识地区分 `down` 和 `down -v`。
+  - 验证容器与数据卷的独立生命周期，并定位挂载错误。
 ---
+容器可以随时重建，数据不一定可以。这一课先写一个文本文件再删容器，看它是否还在；之后再学习目录挂载、只读挂载和共享卷。数据库章节会用同样的方法保存 MySQL 与 Redis 数据。
 
-数据库容器升级重建，表里的练习记录却消失了。数据库文件默认落在容器可写层；删除容器时，这层也一起删。需要跨容器保留的数据应该放在容器之外的持久化位置。
+准备：Bash、Docker。下面只操作名为 `volume-note` 的实验卷，不需要进入项目目录。
 
-## 文件该放在容器之外的哪里
+## 写一个文件，换个容器再读
 
-命名卷由 Docker 管理，适合数据库这类持续保存的数据；bind mount 则把宿主机明确的某个目录映射进去，源码热更新和人工编辑配置时更直观。两者都不是自动备份，更不是让多个数据库副本可以安全共用的魔法盘。课程 Compose 将 PostgreSQL 数据放进 `course-data` 命名卷。
-
-## 重建容器后再查一次记录
-
-写入一条 visit 后用 `docker compose down` 停止服务，卷会保留。再启动并查询，记录仍然存在。只有明确运行 `down -v` 才同时删除 Compose 管理的卷；做这一步前先确认本地练习数据不用留了。
-
-~~~powershell
-docker compose up --build -d --wait
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType "application/json" -Body '{"note":"volume-test"}'
-docker compose down
-docker compose up -d --wait
-Invoke-RestMethod http://localhost:8080/visits
+~~~bash
+docker volume create volume-note
+docker run --rm --mount source=volume-note,target=/data \
+  alpine:3.22 sh -c 'echo saved-in-volume > /data/note.txt'
+docker run --rm --mount source=volume-note,target=/data \
+  alpine:3.22 cat /data/note.txt
 ~~~
 
-## 核对数据记录和 Compose 实际声明的卷
+第二个容器应输出 `saved-in-volume`。第一个容器已因 `--rm` 删除，文件还在，因为 `/data` 映射到独立的命名卷。对比在没有挂载的 `/tmp` 里写文件：容器删了，那个可写层中的文件就随之消失。
 
-重建与数据查询的练习已经在上面完成，这里只读数据库行数、Compose 声明的卷名和本机卷列表。卷名称通常带项目名前缀；确认数据归属后再考虑任何删除操作。
+`source` 是卷名，`target` 是容器里的路径。挂载之后，应用读写 target，就在读写那份卷。Desktop 的卷一般在其 Linux 环境里，不要在 Windows 上寻找一个同名 C 盘目录。
 
-~~~powershell
-docker compose exec -T db psql -U course -d course -c 'SELECT COUNT(*) FROM visits;'
-docker compose config --volumes
-docker volume ls --filter label=com.docker.compose.project
-~~~
+## Volume 与 bind mount 怎么选
 
-## 选哪种挂载方式取决于数据是谁负责管理
-
-| 类型 | 主要用途 | 容器删除后 |
+| 方式 | 谁选数据位置 | 适合什么 |
 |---|---|---|
-| named volume | 数据库、队列等由 Docker 管理的数据目录 | 通常仍保留，可供新容器重新挂载 |
-| bind mount | 开发时把宿主机源码或配置映射进容器 | 文件仍在宿主机原路径 |
-| tmpfs | 临时且不应写入持久磁盘的数据 | 容器停止后消失 |
-| 容器可写层 | 临时文件、运行状态 | 删除该容器后消失 |
+| 命名卷 Volume | Docker 管理 | 数据库文件，明确命名、复用和备份 |
+| 目录挂载 bind mount | 你指定宿主目录 | 网页源码、配置文件、本地开发 |
+| tmpfs | 内存临时空间 | 不需要持久保存的临时数据，主要用于 Linux |
 
-Compose 文件中的 course-data 是 named volume，PostgreSQL 数据写在容器的数据库目录，但实际数据由 Engine 持久保存。删除 PostgreSQL 容器并重新创建时，同一个 volume 可以继续挂载。volume 不是备份：磁盘坏、误删卷或数据逻辑损坏仍会丢数据。
+打开本机实验目录，创建一份网页：
 
-## 观察数据库数据落在哪儿
-
-先确认本地课程 Compose 已启动，再查卷名、挂载点和容器挂载关系。Compose 会在卷名前加项目名，因此实际名称可能是当前项目名前缀加 course-data。
-
-~~~powershell
-docker compose ps
-docker volume ls
-docker volume inspect (docker volume ls -q --filter name=course-data)
-docker inspect (docker compose ps -q db) --format '{{json .Mounts}}'
+~~~bash
+mkdir -p ~/docker-practice/mount/site
+cd ~/docker-practice/mount
+printf '<h1>hello from my folder</h1>\n' > site/index.html
+docker run --name mount-web -d -p 127.0.0.1:8084:80 \
+  --mount type=bind,source="$PWD/site",target=/usr/share/nginx/html,readonly \
+  nginx:stable-alpine
+curl http://localhost:8084
 ~~~
 
-如果卷名筛选没有输出，先查看 docker volume ls 的真实结果；不要猜测卷名后直接删除。容器挂载路径应对应 PostgreSQL 数据目录。不同 PostgreSQL 主版本可能调整官方镜像的数据目录布局，升级数据库镜像前要检查官方迁移说明和 volume 路径。
+页面应包含 hello。把 site/index.html 改成另一句话，再刷新浏览器，会直接变化。`$PWD` 是本机 Bash 当前目录，绝对路径避免了“在另一个目录执行就挂错文件”的问题。
 
-## 验证重建容器后数据仍在
+## readonly 限制哪一边
 
-写入课程 API 的一条虚构记录，然后只重建数据库容器，不删除卷。接着重新等待数据库健康，再读取记录。
-
-~~~powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType 'application/json' -Body '{"note":"volume-survives-container"}'
-docker compose up -d --force-recreate --wait db
-docker compose ps
-Invoke-RestMethod http://localhost:8080/health/ready
-Invoke-RestMethod http://localhost:8080/visits
+~~~bash
+docker exec mount-web sh -c 'echo denied > /usr/share/nginx/html/test.txt'
+printf '<h1>changed on host</h1>\n' > site/index.html
+curl http://localhost:8084
 ~~~
 
-预期重建期间 API 暂时无法连接数据库；健康恢复后，刚写入的记录仍存在。若仅验证容器 Running，不能证明数据正确；要实际读回刚才那条记录。
+容器写入应报只读文件系统；宿主机仍能改文件，网页也能读取最新内容。只读挂载限制的是容器这一边，不是把你电脑目录永久设成只读。
 
-## 备份和删除是两件独立工作
+长写法 `--mount ... readonly` 与 `-v 本机目录:容器目录:ro` 都能表达这个需求。`--mount type=bind` 的源目录不存在时会明确报错；某些 `-v` 写法会自动创建目录，文件名写错因此容易被误建成文件夹。
 
-生产备份要使用数据库支持的一致性备份方式，保存到独立位置，并定期在隔离环境恢复验证。把正在写入的数据库目录直接 tar 成文件，不一定得到一致备份。恢复演练要验证数据库能启动、记录可读和业务请求成功。
+## 多个容器可以读同一个卷
 
-docker compose down 默认移除服务容器和网络，保留 named volume；down -v 会连卷一起删除。遇到磁盘不足也先确认哪些卷属于实验，再按卷名清理。不要把 volume prune 当成无风险的空间整理命令。
+~~~bash
+docker run --rm --mount source=volume-note,target=/shared,readonly \
+  alpine:3.22 cat /shared/note.txt
+docker volume inspect volume-note
+~~~
 
-## 参考资料
+挂载路径不必一样：之前是 `/data`，现在是 `/shared`，指向的仍是同一个卷。老教程中的 `--volumes-from 容器名` 会复用另一容器的挂载定义，不是复制或备份数据；明确写卷名更容易看懂关系。
 
-- [Docker volumes](https://docs.docker.com/engine/storage/volumes/)
-- [Bind mounts](https://docs.docker.com/engine/storage/bind-mounts/)
+不要让两个 MySQL 主进程同时对同一个数据目录读写。共享目录只解决“看见同一文件”，不会替数据库协调并发。
+
+## 权限错误和“挂载后文件没了”
+
+先用 `docker inspect mount-web --format '{{json .Mounts}}'` 确认 source 与 destination。挂一个空目录到镜像原有目录上，会遮住原来的文件，这是挂载的正常效果。
+
+Linux 的 bind mount 要看 UID/GID 与目录权限；启用 SELinux 的系统还要看标签，可按系统说明使用 `:Z` 或 `:z`。普通挂载不需要 `--privileged`，不要为了解决一个目录权限问题给整个容器主机级权限。
+
+清理网页容器后，宿主机 site 目录仍在。命名卷需要你明确决定是否删除：
+
+~~~bash
+docker rm -f mount-web
+docker volume inspect volume-note
+# 确认 note.txt 只是这次实验数据后再执行
+docker volume rm volume-note
+~~~
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/engine/storage/volumes/)
+- [进一步了解相关机制](https://docs.docker.com/engine/storage/bind-mounts/)

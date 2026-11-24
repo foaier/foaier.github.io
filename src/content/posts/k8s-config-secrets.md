@@ -1,88 +1,117 @@
 ---
-title: 配置和密码别烘焙进镜像：ConfigMap 与 Secret 怎么用
+title: 配置和密码怎么交给 Pod：ConfigMap、Secret 与 Downward API
 date: '2026-11-24'
-summary: 拆开普通配置和敏感值，搞清环境变量更新与 Secret 的保护边界。
+summary: 分别实验环境变量、文件挂载和 Pod 元数据，观察配置更新为什么有时需要重建 Pod。
 series: Docker 与 Kubernetes
-order: 25
+order: 32
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
   - k8s-service
 goals:
-  - 通过 ConfigMap 注入日志配置，并解释 Secret base64 不等于加密。
+  - 分别实验环境变量、文件挂载和 Pod 元数据，观察配置更新为什么有时需要重建 Pod。
 ---
+镜像里不要写死“测试环境”和数据库密码。程序相同，运行配置不同，把配置和程序分开才能复用镜像。ConfigMap 放普通配置；Secret 表示需要更严格访问控制的数据，但不是自动加密保险箱。
 
-同一份镜像在测试用测试库，在生产用生产库，通常不该为了换连接串重打一份镜像。把普通配置放 ConfigMap、敏感值放 Secret，再由部署清单引用，镜像才能只关注程序和依赖。
+## 创建两种配置
 
-## 配置对象更新后，进程未必重读
+全部命令在 kind-course、lab 中执行。这里只使用公开的教学密码，不输入真实凭证。
 
-Secret 并不是“放进去就绝对安全”的保险柜。API 返回的 data 常见是 base64 编码；能读取 Secret 的账号仍能还原明文。生产需要合适的 RBAC、控制面静态加密、审计和密钥轮换，或对接外部秘密管理服务。课程密码只是虚构值，不能照搬到外网。
-
-ConfigMap 的环境变量在容器创建时读取，更新对象不会让现有进程的环境变量自动改变。挂载文件的更新机制又不同，应用还得支持重新加载，subPath 挂载有额外限制。不要把“配置对象已更新”和“程序已使用新配置”画等号。
-
-## 给 API 注入一项日志配置
-
-基础清单已从 Secret 引用数据库密码。这次创建普通 ConfigMap，给 API 注入 .NET 标准日志级别键，并显式触发一次 rollout，让新进程拿到配置。每条命令都限定在课程 namespace。
-
-~~~powershell
-kubectl -n container-course create configmap course-settings --from-literal=Logging__LogLevel__Default=Warning --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n container-course set env deployment/course-api --from=configmap/course-settings
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course get configmap course-settings
-kubectl -n container-course get secret course-db
+~~~bash
+kubectl -n lab create configmap settings --from-literal=MODE=study --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n lab create secret generic demo-secret --from-literal=password=local-demo-only --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n lab get configmap settings
+kubectl -n lab get secret demo-secret
 ~~~
 
-## 检查 Pod 已引用的配置名称，不读取秘密值
+`generic` 创建一般用途 Secret；类型是 Opaque。`get secret` 默认只列键数量，不显示值，但有读取权限的人仍可读取数据。Base64 只是编码，能反向解码；生产还需要 RBAC、etcd 静态加密或外部秘密管理、密钥轮换和审计。
 
-下面列 API Pod、检查 Deployment 声明的 Secret 引用键名，并筛出告警事件。输出只用于核对引用是否拼对，不读取 Secret data；若新 Pod 没替换，继续看 rollout 和事件原因。
+## 让一个 Pod 同时读取变量和文件
 
-~~~powershell
-kubectl -n container-course get pods -l app=course-api -o wide
-kubectl -n container-course get deployment course-api -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{" => "}{.valueFrom.secretKeyRef.name}{"/"}{.valueFrom.secretKeyRef.key}{"\n"}{end}'
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~yaml file=config/reader.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-reader
+  namespace: lab
+spec:
+  containers:
+    - name: reader
+      image: busybox:1.37
+      command: ["sh", "-c", "sleep 86400"]
+      env:
+        - name: MODE
+          valueFrom:
+            configMapKeyRef:
+              name: settings
+              key: MODE
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+      volumeMounts:
+        - name: settings
+          mountPath: /etc/lab-config
+          readOnly: true
+        - name: password
+          mountPath: /etc/lab-secret
+          readOnly: true
+  volumes:
+    - name: settings
+      configMap:
+        name: settings
+    - name: password
+      secret:
+        secretName: demo-secret
 ~~~
 
-## ConfigMap 和 Secret 的功能边界
-
-ConfigMap 放普通配置，Secret 放凭据或证书；两者都是 Kubernetes API 对象，都会被有权限的主体读取。Secret 的 data 使用 Base64 表示只是编码，不是加密。集群要配置 etcd 静态加密、限制 RBAC 权限并保护备份；有更高要求时通过外部 Secret 管理系统注入短期凭据。
-
-| 注入方式 | 更新后进程看到什么 | 常见限制 |
-|---|---|---|
-| 环境变量 | 旧进程不会自动刷新 | 通常需滚动重建 Pod |
-| Secret/ConfigMap volume | 文件会最终更新 | 应用必须重新读取文件；subPath 挂载不会按普通方式更新 |
-| 启动参数 | 启动时固定 | 需重新创建进程 |
-
-ConfigMap 和 Secret 都不适合放大体积文件。它们有对象大小限制，配置文件较大时应使用镜像、卷或专用配置服务。
-
-## 让配置成为 Pod 模板的一部分
-
-Pod 通过 envFrom、单个 valueFrom 或 volume 引用配置对象。引用名称拼错时，Pod 可能无法启动；Secret key 不存在时也会出现创建错误。改动环境变量后，Deployment 模板应产生新 revision，旧 Pod 不会凭空改变自己的进程环境。
-
-~~~yaml
-env:
-  - name: Logging__LogLevel__Default
-    valueFrom:
-      configMapKeyRef:
-        name: course-settings
-        key: Logging__LogLevel__Default
-  - name: POSTGRES_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: course-db
-        key: password
-        optional: false
+~~~bash
+kubectl apply -f config/reader.yaml
+kubectl -n lab wait --for=condition=Ready pod/config-reader --timeout=120s
+kubectl -n lab exec config-reader -- printenv MODE POD_NAME
+kubectl -n lab exec config-reader -- cat /etc/lab-config/MODE
+kubectl -n lab exec config-reader -- ls /etc/lab-secret
 ~~~
 
-这个片段展示字段关系，使用前面的 course-settings 和 course-db 对象；实际生产应用只注入它确实要读取的变量。不要因为变量已注入就假设程序读取了它。对环境变量更新，通常要让 Deployment 模板变更或 rollout restart，并确认新 Pod 的时间和 revision。
+应看到环境变量 study、Pod 名 config-reader，目录里分别有 MODE 和 password 文件。没有把密码写进日志。Downward API 的 fieldRef 让 Pod 获得自身名字等元数据，不用应用额外登录 API Server 查询自己是谁。
 
-## 轮换配置后验收新旧实例
+## 修改配置，观察两种注入方式的不同
 
-更新配置时先确认应用是否支持热加载。若不支持，触发滚动更新后检查新 Pod、EndpointSlice 和业务请求；旧凭据失效的时机应等新版本已成功使用新凭据之后。回滚应用不会自动恢复已经撤销的外部密钥。
+~~~bash
+kubectl -n lab patch configmap settings --type=merge -p '{"data":{"MODE":"practice"}}'
+kubectl -n lab exec config-reader -- printenv MODE
+kubectl -n lab exec config-reader -- cat /etc/lab-config/MODE
+~~~
 
-## 参考资料
+环境变量仍是 study，因为它在启动时确定；目录挂载的文件会经过 kubelet 同步后变成 practice，可能需要等一段时间，重复最后一条观察即可。这里没有使用 subPath；subPath 挂载不会随 ConfigMap 自动更新。
 
-- [ConfigMap](https://kubernetes.io/docs/concepts/configuration/configmap/)
-- [Secret](https://kubernetes.io/docs/concepts/configuration/secret/)
+文件变了不等于应用生效了。如果应用只在启动时读文件，还需要重载或重启。不要把“卷内容更新”和“程序自动热更新”当成一个承诺。
+
+## 重建 Pod，让变量也更新
+
+~~~bash
+kubectl -n lab delete pod config-reader
+kubectl apply -f config/reader.yaml
+kubectl -n lab wait --for=condition=Ready pod/config-reader --timeout=120s
+kubectl -n lab exec config-reader -- printenv MODE
+~~~
+
+现在返回 practice。Deployment 可以用 `rollout restart` 滚动重建，独立 Pod 则需要重建。正式应用最好让配置版本和发布版本一起管理，避免新旧 Pod 在不知情的情况下读到不同配置。
+
+## 找不到配置时，不要先改镜像
+
+Secret、ConfigMap 必须与 Pod 在同一 namespace，名称和 key 要完全一致。缺失引用可能表现为 CreateContainerConfigError 或 FailedMount；`kubectl -n lab describe pod config-reader` 的事件会直接指出对象或键名。`immutable: true` 可以禁止后续修改数据，适合按版本新建配置，但这时更新需要新对象名和新 Pod 模板。
+
+~~~bash
+kubectl -n lab delete pod config-reader
+kubectl -n lab delete configmap settings
+kubectl -n lab delete secret demo-secret
+~~~
+
+清理只删除本课三个对象。不要用删除整个 namespace 的方式顺手清掉其他课程的服务。
+
+## 继续阅读
+
+- [ConfigMap](https://kubernetes.io/zh-cn/docs/concepts/configuration/configmap/)
+- [Secret](https://kubernetes.io/zh-cn/docs/concepts/configuration/secret/)

@@ -1,0 +1,58 @@
+name: docker-labs
+services:
+  app:
+    image: foaier-java:lesson
+    build: ./java-app
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/notes
+      DB_USER: app
+      DB_PASSWORD: local-app-only
+      REDIS_HOST: redis
+      REDIS_PASSWORD: local-redis-only
+      DEMO_MESSAGE: hello-compose
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
+      interval: 5s
+      timeout: 8s
+      retries: 6
+      start_period: 40s
+    restart: unless-stopped
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: local-root-only
+      MYSQL_DATABASE: notes
+      MYSQL_USER: app
+      MYSQL_PASSWORD: local-app-only
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -uapp -D notes -e 'SELECT 1' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - redis-data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=local-redis-only redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  mysql-data:
+  redis-data:

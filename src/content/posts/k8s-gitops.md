@@ -1,74 +1,120 @@
 ---
-title: GitOps 是让 GitHub 自动 SSH 吗？先把部署的职责拆开
+title: GitOps：让集群跟着 Git 走，而不是记住谁敲过命令
 date: '2026-11-24'
-summary: 区分 Actions 构建发布与集群侧持续协调，并练习可审查的变更流程。
+summary: 安装 Argo CD，同步一个固定版本的公开示例，制造副本漂移并观察自动修复，再解释真实发布流程。
 series: Docker 与 Kubernetes
-order: 41
+order: 54
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
-  - k8s-etcd-upgrades
+  - k8s-helm-kustomize
+  - k8s-rollouts
+  - k8s-private-registry
 goals:
-  - 为镜像更新画出 CI 与 GitOps 的职责边界，以及可审查的回滚路径。
+  - 安装 Argo CD，同步一个固定版本的公开示例，制造副本漂移并观察自动修复，再解释真实发布流程。
 ---
+人手执行 kubectl 很适合学习，但多人管理时很难回答“现在集群到底对应哪次改动”。GitOps 把期望配置放进 Git，由控制器持续比较 Git 与集群状态。Git 记录发布意图，控制器负责把意图同步到集群。
 
-CI 把镜像推到 GHCR 后，为什么它没自动出现在 kind 里？构建发布和部署是两段工作。把权限与变更记录分开，能减少长期集群凭证落进 CI 的风险。
+## CI 和 GitOps 控制器各做什么
 
-## 构建镜像与协调部署各自负责一段
+CI 编译、测试、扫描并推镜像；部署仓库记录目标镜像版本和 YAML；Argo CD 拉取配置并同步。Argo CD 不会因为应用源码变了就自动替你构建镜像，镜像更新也需要配置中实际出现新 tag 或 digest。
 
-CI 通常负责测试、构建、扫描并产出不可变标签或 digest。GitOps controller 部署在集群侧，持续比较 Git 声明与运行状态并协调差异。开发者通过 PR 更新镜像版本，审核通过后 controller 同步。Flux 与 Argo CD 是常见实现，不是 GitHub Actions 的另一个名字。
+本课使用固定提交的公开示例完成无凭证实验，不需要先把自己的仓库访问令牌交给集群。它只是一个演示网页，不能作为生产镜像选型。
 
-本仓库 workflow 发布课程 GHCR 镜像，不部署生产集群。kind 用本机镜像和 kubectl。上 GitOps 前要设计 repo 读取权限、secret、分支保护、漂移告警和人工回滚，而不是把管理员 kubeconfig 存进 Actions。
+## 安装 Argo CD，只在本机访问
 
-## 对上代码、镜像和当前部署
+在 kind-course 执行，预留足够内存；先卸载前面的 Harbor、监控等重型组件。
 
-下面两条读文件和 Git 历史的命令在**整站仓库根目录**执行；源码压缩包不是 Git 仓库，可以改为[在线查看 workflow](https://github.com/foaier/foaier.github.io/blob/main/.github/workflows/container-course.yml)。集群仍选 kind-course。先读触发条件和权限，再看 Deployment 的镜像版本。
-
-~~~powershell
-Get-Content .github/workflows/container-course.yml
-kubectl -n container-course get deployment course-api -o jsonpath="{.spec.template.spec.containers[0].image}"
-git log -5 --oneline -- examples/container-course .github/workflows/container-course.yml
+~~~bash
+kubectl config use-context kind-course
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply --server-side --force-conflicts -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.2.0/manifests/install.yaml
+kubectl -n argocd rollout status deployment/argocd-server --timeout=300s
+kubectl -n argocd rollout status deployment/argocd-repo-server --timeout=300s
+kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
+kubectl -n argocd port-forward service/argocd-server 8444:443
 ~~~
 
-## 并排检查 Git 期望状态和集群当前状态
+浏览器打开 `https://127.0.0.1:8444`。这是本地自签名证书的管理界面；不要把端口转发监听改为 0.0.0.0 向公网开放。初次安装的 admin 密码在专用 Secret 中，另开终端读取，仅在自己电脑使用：
 
-第一条显示 Git 中渲染的声明，第二条显示集群现状，第三条查看部署模板修订。若手工 scale 后同步又改回去，说明 Git 仍声明旧副本数。把需要保留的变更提交回仓库，让一个来源负责期望状态。
-
-~~~powershell
-kubectl kustomize k8s
-kubectl -n container-course get deployment course-api -o yaml
-kubectl -n container-course rollout history deployment/course-api
+~~~bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 --decode
+printf '\n'
 ~~~
 
-## CI、镜像仓库和 GitOps 各负责一段
+server-side apply 用于大型 CRD；force-conflicts 只针对这里的全新学习安装，不要把它当成接管别人生产字段的常用手段。
 
-| 环节 | 典型负责人 | 产物或状态 |
-|---|---|---|
-| CI | GitHub Actions 等 Runner | 测试报告、镜像 digest、供应链元数据 |
-| 镜像仓库 | GHCR 或企业 Registry | 可拉取的不可变制品 |
-| 部署仓库 | 平台/应用团队 | 环境期望版本、YAML/Chart/values |
-| GitOps controller | 集群内 Flux、Argo CD 等 | Git 与实际集群状态的持续对账 |
-| 运行验收 | 业务与平台团队 | rollout、健康请求、告警和回滚证据 |
+## 声明 Git 仓库、路径、版本和目标位置
 
-CI 把镜像发布成功，不代表集群已经部署；GitOps 对账成功，也不代表请求链路和数据迁移正确。每一段都需要独立的权限和验收条件。
+文件 `gitops/application.yaml` 指向固定提交，避免示例默认分支变化影响这次实验：
 
-## 漂移为什么会被自动改回去
+~~~yaml file=gitops/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lesson-guestbook
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: 8088f4c0d970abb09e250248cc97e35623447cb5
+    path: guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-lab
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+~~~
 
-GitOps controller 周期性读取受信任分支的期望对象，与 live state 做比较。手工 kubectl scale 造成副本数不同后，controller 会再次应用 Git 里的副本数；这不是随机覆盖，而是声明式控制的核心行为。事故中的临时修复要记录，并通过 PR 把长期需要的状态提交回配置仓库。
+~~~bash
+kubectl apply -f gitops/application.yaml
+kubectl -n argocd get application lesson-guestbook
+kubectl -n argocd patch application lesson-guestbook --type=merge -p '{"operation":{"sync":{"prune":false}}}'
+kubectl -n argocd wait --for=jsonpath='{.status.sync.status}'=Synced application/lesson-guestbook --timeout=300s
+kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy application/lesson-guestbook --timeout=300s
+kubectl -n gitops-lab get deployments,services,pods
+~~~
 
-敏感值不应以明文进入 Git。常见做法包括外部 Secret controller、加密后提交的 Secret 文件或云端身份短期取密；具体选型要验证密钥轮换、审计和恢复流程。Git 只读权限也要限制到必要仓库和分支。
+Application 是 Argo CD 提供的 CRD。Synced 表示期望配置已同步，Healthy 表示控制器判断资源健康，两者都不替代业务请求测试。若 ComparisonError，先看 repo-server 的仓库网络访问；ImagePullBackOff 则查示例镜像拉取，不把两者混为 Git 同步故障。
 
-## 上线前设计一条能回滚的变更路径
+## 访问网页，再制造配置漂移
 
-新版本镜像先由 CI 产出 SHA 标签和 digest；PR 更新部署仓库中的镜像引用、资源和配置；审查通过后 controller 同步；发布后观察 Deployment condition、就绪副本、错误率和真实请求。失败时回滚配置提交或提交一个指向旧 digest 的新变更，保留完整审计历史。
+~~~bash
+kubectl -n gitops-lab port-forward service/guestbook-ui 8089:80
+~~~
 
-集群 controller 失联时已有工作负载可能继续运行，但新变更和漂移修复停滞。应监控最近同步时间、错误状态、仓库认证和 API 访问；恢复后先检查差异再让它自动协调，避免一次性应用过多积压变更。
+浏览器打开 `http://127.0.0.1:8089`，或另终端 `curl -I http://127.0.0.1:8089`。随后 Ctrl+C 停止这个转发，启用自动同步和自动修复，再把副本临时改为 3：
 
-## 参考资料
+~~~bash
+kubectl -n argocd patch application lesson-guestbook --type=merge -p '{"spec":{"syncPolicy":{"automated":{"prune":false,"selfHeal":true}}}}'
+kubectl -n gitops-lab scale deployment guestbook-ui --replicas=3
+kubectl -n gitops-lab get deployment guestbook-ui -w
+~~~
 
-- [OpenGitOps 原则](https://opengitops.dev/)
-- [Actions 安全强化](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)
-- [Flux 文档](https://fluxcd.io/flux/)
+等待控制器检测差异，副本会回到 Git 文件定义的数量。按 Ctrl+C 退出观察。紧急手改后“怎么又变回去了”往往就是 selfHeal；真实修复应提交配置变更，或有意识地暂停同步并记录临时处理。
+
+## prune 为什么单独关闭
+
+selfHeal 修复漂移，prune 允许删除 Git 中已移除的资源。后者可能影响数据和服务，所以本课先关闭，用实际理解再决定是否开启。数据库 PVC、namespace、CRD 的删除策略不能只靠一个全局开关决定。
+
+正式项目要建立受限 AppProject，约束可读仓库、目标集群、namespace 和资源种类；默认 project 适合本机体验，不适合把所有团队放在一起。私有仓库凭证、生产审批、镜像 digest、回滚和审计也需单独配置。
+
+## 清理时保留谁来删除资源的明确责任
+
+本课 Application 没设置级联删除 finalizer，先删 Application 停止管理，再明确删除专用 namespace。不要把这套行为推断成所有 Argo CD 应用都一样。
+
+~~~bash
+kubectl -n argocd delete application lesson-guestbook
+kubectl delete namespace gitops-lab
+kubectl delete namespace argocd
+~~~
+
+最后停止管理界面的转发终端。共享 CRD 可以保留到最终删 kind 集群时清理。下一次正式发布的核心仍是：构建可追溯镜像、修改期望版本、审核、同步、验证业务，而不是在界面上点一次绿色按钮就结束。
+
+## 继续阅读
+
+- [Argo CD 入门](https://argo-cd.readthedocs.io/en/stable/getting_started/)
+- [自动同步与自动修复](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/)

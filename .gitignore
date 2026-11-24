@@ -10,3 +10,11 @@ examples/**/.state/
 examples/**/.env
 public/downloads/ai-course.zip
 public/downloads/container-course.zip
+
+public/downloads/docker-labs.zip
+examples/**/target/
+examples/**/backups/
+public/downloads/k8s-labs.zip
+examples/k8s-labs/scratch/
+examples/k8s-labs/kind-logs/
+examples/k8s-labs/audit-debug/

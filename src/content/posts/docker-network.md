@@ -1,82 +1,96 @@
 ---
-title: 两个容器怎么互相找到对方？用自己的网络和服务名
+title: Docker 网络：名字怎么找到容器，localhost 又指向谁
 date: '2026-11-24'
-summary: 通过用户定义 bridge 网络和 DNS 名称连接 API 与数据库。
+summary: 自建网络、按名字访问、断开后恢复，再比较四种网络模式。
 series: Docker 与 Kubernetes
-order: 13
+order: 12
 tags:
-  - Docker 实战
   - Docker
-  - Kubernetes
+  - Docker 实战
 level: Docker 实战
 prerequisites:
-  - docker-volumes
+  - docker-redis
 goals:
-  - 不使用容器 IP，让 API 容器通过数据库服务名连接 PostgreSQL。
+  - 验证容器 DNS 和网络连接，避免依赖临时 IP。
 ---
+在 API 容器里写 `localhost:3306`，它找的是 API 自己，不是另一个 MySQL 容器。Docker 网络解决的是“这些容器怎样互相找到、互相连接”。这节用两个容器把名字解析、端口访问和网络隔离分开验证。
 
-API 在一个容器里，PostgreSQL 在另一个。把 `localhost:5432` 填进 API 配置，连接却失败。容器里的 localhost 指向 API 容器自己，不是数据库，也不是你的电脑。
+准备：Bash、Docker。无需运行数据库，任意目录执行即可。使用独立网络 `network-note`。
 
-## 容器里的 localhost 指向它自己
+## 建自己的网络，用名字访问网页
 
-把两个容器接到同一个用户定义 bridge 网络，Docker 会为网络里的容器提供可解析的名字。Compose 默认替项目创建网络，并把服务名作为发现入口，因此连接串里写 `Host=db`。容器 IP 可以随着重建改变，不应该抄进配置当成固定地址。
+~~~bash
+docker network create network-note
+docker run --name network-web -d --network network-note nginx:stable-alpine
+docker run --rm --network network-note busybox:1.37 nslookup network-web
+docker run --rm --network network-note busybox:1.37 wget -qO- http://network-web
+~~~
 
-## 找到 API 和数据库共用的网络
+nslookup 应解析出容器地址，wget 应打印 Nginx HTML。这里没有 `-p`，但同网络的客户端仍能访问容器端口 80。`-p` 解决主机访问容器，不是容器之间通信的必要条件。
 
-Compose 示例的 API 配置连接 `db` 服务；数据库端口没有发布到宿主机，同网络里能路由到它的容器仍可访问。下面通过数据库容器实际使用的网络名来检查，不依赖你给解压文件夹取了什么名字。
+用户自建 bridge 网络提供按容器名发现服务的能力。默认的 bridge 网络不能按相同方式假定容器名 DNS 可用，因此多服务练习主动创建网络。
 
-~~~powershell
-docker compose up --build -d --wait
+## 查看连接关系，别把 IP 写死
+
+~~~bash
 docker network ls
-$courseDb = docker compose ps -q db
-$courseNetworks = docker inspect $courseDb --format '{{json .NetworkSettings.Networks}}' | ConvertFrom-Json
-$courseNetworks.PSObject.Properties.Name | ForEach-Object { docker network inspect $_ }
-docker compose exec api printenv ConnectionStrings__Default
+docker network inspect network-note
+docker inspect network-web --format '{{json .NetworkSettings.Networks}}'
 ~~~
 
-## 查看 API 容器加入了哪个网络
+inspect 的 Containers 中应有 network-web。容器重建后 IP 可以变化，长期配置用名字。你看到的桥接网卡位于运行 Docker Engine 的 Linux 环境中，Desktop 用户在 Windows 的网络列表里不一定看到同样的 docker0。
 
-连接串能证明应用配置里写了什么，inspect 则能确认这个容器实际加入的网络。这里直接看 API 容器的网络和 DNS 配置；同一网络中的服务名才能解析，容器 IP 不要写进长期配置。
-
-~~~powershell
-$apiId = docker compose ps -q api
-docker inspect $apiId --format '{{json .NetworkSettings.Networks}}'
-docker compose exec api cat /etc/resolv.conf
+~~~text
+network-note 网络
+    客户端 → DNS 找 network-web → 容器 IP:80 → Nginx
+本机浏览器要访问它？另加 -p 发布主机端口
 ~~~
 
-## Docker 常用网络的工作方式
+## 四种网络方式分别用在哪里
 
-| 网络类型 | 典型场景 | 容器之间是否有 Docker DNS |
+| 模式 | 行为 | 注意 |
 |---|---|---|
-| 默认 bridge | 单个容器或快速试跑 | 不应依赖容器名 DNS，建议建用户自定义 bridge |
-| 用户自定义 bridge | 单机多容器和 Compose | 可以用容器名或 Compose 服务名找对方 |
-| host | 特定 Linux 场景，共享主机网络 | 没有普通 bridge 的端口隔离方式 |
-| none | 不需要网络的离线任务 | 无外部网络 |
+| 自建 bridge | 容器有自己的地址，网络内可按名字互访 | 本系列多服务主线 |
+| host | 共用主机网络 | Linux 上直接占主机端口；Desktop 支持条件不同，`-p` 不再有同样作用 |
+| none | 只有本地回环，没有通常的外部连接 | 离线任务或网络隔离实验 |
+| container:名字 | 共享指定容器的网络空间 | localhost 相同，但文件系统仍分开 |
 
-Compose 默认会为一个项目创建专属网络。同一网络里的 API 可以用 db:5432 访问数据库；数据库无需发布宿主机端口。-p 是把主机入口转发到容器，和容器间网络访问是两条不同路径。
+用 none 看一下接口，再共享网页容器的网络执行请求：
 
-## 用一个独立网络验证服务名解析
-
-以下实验创建两个有明确名称的临时容器：web 提供 HTTP，client 通过网络内 DNS 用 web 名称请求它。命令不会暴露主机端口。
-
-~~~powershell
-docker network create net-lab
-docker run -d --name web-lab --network net-lab nginx:alpine
-docker run --rm --network net-lab busybox:1.36 wget -qO- http://web-lab
-docker network inspect net-lab
-docker rm -f web-lab
-docker network rm net-lab
+~~~bash
+docker run --rm --network none alpine:3.22 ip addr
+docker run --rm --network container:network-web busybox:1.37 wget -qO- http://127.0.0.1
 ~~~
 
-预期第三条返回 Nginx 欢迎页 HTML；inspect 中能看到 web-lab 作为网络成员。命令使用的 busybox 镜像第一次运行时需要下载。若提示名称冲突，先确认冲突对象是本课旧实验，再删除对应名字；不要清理所有网络。
+第二条能访问网页，因为两个进程这次在同一个网络空间里。这不是通常独立容器的 localhost 行为，也不会把两个容器的磁盘合并。
 
-## 连接异常时看两端，不要先改 DNS
+## 故意断开网络，再恢复
 
-一个容器访问另一个服务失败，按顺序确认：两者是否加入同一网络；目标名称是否能解析；服务在容器内监听哪个端口；应用是否监听 0.0.0.0；Network/host 防火墙是否允许路径。只有 DNS 解析失败时才重点查名称和网络 DNS；连接被拒绝往往是目标没有监听；超时更可能是路径被丢弃或目标无响应。
+~~~bash
+docker network disconnect network-note network-web
+docker run --rm --network network-note busybox:1.37 wget -T 3 -qO- http://network-web
+docker network connect network-note network-web
+docker run --rm --network network-note busybox:1.37 wget -T 3 -qO- http://network-web
+~~~
 
-对 Compose 服务，先用 docker compose ps 查看服务状态，再检查 docker network inspect 项目网络。把数据库发布到 0.0.0.0 并不是修复 API 到数据库 DNS 的方法，反而扩大了攻击面。
+断开后应该请求失败；重新接入后恢复 HTML。若 DNS 或网络更新有短暂延迟，等一下再试。这个实验说明故障并不总在 Nginx 配置，也可能是两个容器根本不在同一网络。
 
-## 参考资料
+`-T 3` 是这里 BusyBox wget 的超时参数，避免失败时一直等。Docker network connect/disconnect 是在改连接关系，不是在重建应用。
 
-- [Bridge 网络](https://docs.docker.com/engine/network/drivers/bridge/)
-- [Docker Compose 网络](https://docs.docker.com/compose/how-tos/networking/)
+## 从名字到应用，一层层排查
+
+先确认容器正在运行且在同一网络；再 nslookup 名称；再检查目标端口；最后看应用日志。名字能解析不代表目标有进程监听。Connection refused 常是端口没服务，超时可能是网络阻断或对端忙，HTTP 500 则已经进入应用处理。
+
+数据库无需为 API 访问而发布到所有网卡。后面 Compose 会自动给项目建网络，API 连 `mysql:3306`、`redis:6379`，避免把临时 IP 固定进配置。
+
+~~~bash
+docker rm -f network-web
+docker network rm network-note
+~~~
+
+网络提示 active endpoints 时，先用 inspect 查还有哪个容器连接，再清理对应实验对象，不要删除全部网络。
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/engine/network/)
+- [进一步了解相关机制](https://docs.docker.com/engine/network/drivers/bridge/)

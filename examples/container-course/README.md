@@ -1,79 +1,49 @@
-# Docker 与 Kubernetes 课程示例
+# Kubernetes 留言项目
 
-这个示例陪着课程一步一步往前走：先做一个很小的 ASP.NET Core API，再给它配上 PostgreSQL；同一份 API 可以用 Docker 启动、用 Compose 连接数据库，之后再部署到 kind 或其他 Kubernetes 集群。
+这是课程最后的综合实验：两个 ASP.NET Core API 副本连接一个 PostgreSQL。先完成 Pod、Service、Secret、探针和 PVC 课程，再部署本项目。基础课实验在另一个 k8s-labs.zip 中。
 
-## 需要准备什么
+## 环境与目录
 
-- Windows 11：Docker Desktop，开启 WSL 2 后端；macOS：Docker Desktop；Linux：Docker Engine 和 Compose Plugin。
-- 本地 Kubernetes 练习使用 kind。安装 `kubectl`，并确认当前集群是练习用的本机集群。
-- 可选：.NET 10 SDK。容器构建会在 Docker 里使用 .NET SDK 镜像，运行 Compose 不要求宿主机安装 .NET。
+使用 Bash（Windows 为 WSL Ubuntu）、运行中的 Docker、kind 与 kubectl。在本目录应看到 Dockerfile、compose.yaml、k8s/。Docker 构建会使用 .NET SDK 镜像，本机不要求安装 .NET SDK。
 
-## 先启动一个 API
+先按基础课创建三节点 kind 集群 course。kind 自带 standard 默认存储类；本项目的全新 PVC 使用它，不需另装存储插件。已有旧版 local-path PVC 时不要直接修改其 storageClassName，也不要删数据硬套新清单；先保留原配置或备份迁移。
 
-在本目录运行：
+## 构建与部署
 
-```powershell
-docker build -t container-course-api:local .
-docker run --rm -p 127.0.0.1:8080:8080 container-course-api:local
-```
-
-另开终端访问 `http://localhost:8080/`。PowerShell 可以用 `Invoke-RestMethod http://localhost:8080/`。按 Ctrl+C 停止容器。`--rm` 表示停止时删除这个临时容器；镜像还在。
-
-## 再加 PostgreSQL
-
-```powershell
-docker compose up --build -d --wait
-docker compose ps
-Invoke-RestMethod http://localhost:8080/health/ready
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType "application/json" -Body '{"note":"第一次 Compose 实验"}'
-Invoke-RestMethod http://localhost:8080/visits
-```
-
-停止并保留数据库数据：`docker compose down`。实验性地连数据一起清掉：`docker compose down -v`。第二条会删除 Compose 卷中的课程数据，先确认你确实不需要它。
-
-`course-local-only` 只是本机课程密码。仓库没有真实密钥。生产环境要把密码放进受保护的部署 Secret 或秘密管理服务，不要照搬这个示例值。
-`k8s/kustomization.yaml` 使用 Kustomize 管理本地清单。课程 API 使用专用 ServiceAccount，且不自动挂载 Kubernetes API token。
-
-## 在 kind 里部署
-
-在本目录创建名为 course 的练习集群并载入镜像。若同名集群已存在，确认它是自己的 kind 练习环境后跳过创建步骤：
-
-```powershell
-kind create cluster --name course
+```bash
 kubectl config use-context kind-course
 kubectl get nodes
+kubectl get storageclass standard
 docker build -t container-course-api:local .
 kind load docker-image container-course-api:local --name course
 kubectl apply -f k8s/00-namespace.yaml
-# 仅首次创建 Secret；若已存在且密码未变，跳过这行
-kubectl -n container-course create secret generic course-db --from-literal=password=course-local-only
-kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.31/deploy/local-path-storage.yaml
-kubectl -n local-path-storage rollout status deployment/local-path-provisioner --timeout=120s
-kubectl get storageclass
+kubectl -n container-course create secret generic course-db --from-literal=password=course-local-only --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -k k8s
-kubectl -n container-course rollout status deployment/postgres --timeout=120s
-kubectl -n container-course rollout status deployment/course-api --timeout=120s
+kubectl -n container-course rollout status deployment/postgres --timeout=240s
+kubectl -n container-course rollout status deployment/course-api --timeout=240s
 kubectl -n container-course port-forward service/course-api 8080:80
 ```
 
-kind 默认没有动态创建持久卷的组件。课程数据库 PVC 使用 `local-path` StorageClass；上面的步骤安装了本地练习用的 provisioner。不要在生产集群照搬这个本地存储插件。生产环境应使用平台支持的 CSI 存储，并另外设计数据库备份和恢复。
+另开终端：
 
-另开终端用前面的 `/health/ready` 和 `/visits` 验证服务。kind 只是本地练习集群，不具备生产环境的多节点高可用或云盘备份。删除集群会删除这个练习集群的状态。
+```bash
+curl -fsS http://127.0.0.1:8080/health/ready
+curl -i -X POST http://127.0.0.1:8080/visits -H 'Content-Type: application/json' -d '{"note":"my-first-k8s-note"}'
+curl -fsS http://127.0.0.1:8080/visits
+```
 
-## 可选实验
+应看到数据库 connected、POST 返回 201、GET 能读回留言。应用首次按需建立演示表；正式项目使用版本化迁移。公开密码只用于本地实验，Secret 更新不会自动修改已有 PostgreSQL 账号密码。
 
-`labs/` 提供可选的 HPA、NetworkPolicy 和 PDB 示例，不会随 `kubectl apply -k k8s` 自动部署。HPA 需要 Metrics Server；网络策略需要支持策略执行的 CNI。默认 kind 不具备这些条件，先完成对应章节的环境检查。
+## 故障与恢复
 
-## GitHub Actions 镜像发布
+- /health/live 只检查进程响应，/health/ready 检查数据库连接。
+- 缩容 postgres 到 0 后，API 应未就绪，但不因数据库短暂故障反复重启。恢复数据库到 1 副本后等待 API 重新就绪。
+- API 是无状态副本；PostgreSQL 是单实例且使用 Recreate，不是高可用数据库。
+- pg_dump 导出到 backups/，再恢复到独立验证库。完整命令在博客综合课，不能只看备份文件存在就认为可以恢复。
+- labs/ 是旧的可选补充清单，不随 apply -k k8s 安装；HPA 需要 Metrics Server，NetworkPolicy 需要执行策略的 CNI，默认 kindnet 不执行策略。
 
-仓库中的 `.github/workflows/container-course.yml` 会先编译 API，再构建 OCI 镜像。Pull Request 只构建，不发布。推送到 `main` 时使用内置 `GITHUB_TOKEN` 将镜像推到 GHCR，标签包含短提交号；默认分支另外更新 `latest`。
+## 单机运行和停止
 
-发布后，在部署端使用带提交号的标签，例如 `ghcr.io/foaier/container-course-api:sha-abc1234`，以 Actions 日志中的实际标签为准。GitHub Container Registry 新建的包可能默认是私有的，拉取端需要登录；不要把镜像标签当成访问授权。课程示例不会自动 SSH 登录你的服务器或替你部署到生产环境。
+如果只想本地看接口，可运行 docker compose up --build -d --wait；它会占用 8080，进入 Kubernetes 端口转发前用 docker compose down 停止。不要加 -v，除非确定要删除 Compose 数据卷。
 
-## 健康检查这几个地址有什么区别
-
-- `/health/live`：进程能响应；Kubernetes 用它判断容器是否需要重启。
-- `/health/ready`：数据库连接可用；未就绪的 API 不应接收业务流量。
-- `/visits`：需要数据库。第一次写入时创建演示表，目的只是少引入一套迁移工具。真实服务应使用版本化数据库迁移。
-
-固定依赖和命令见项目文件。代码示例是教学用的单实例 PostgreSQL 配置；PVC 不等于备份，单副本数据库也不是高可用集群。
+集群里临时停服务：kubectl -n container-course scale deployment course-api postgres --replicas=0。恢复先 postgres=1，再 course-api=2。删除 namespace 会删除 PVC 和课程数据；删除 kind 集群也会删除节点本地数据，先确认备份和保留需求。

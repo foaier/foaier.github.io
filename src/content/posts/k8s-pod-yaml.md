@@ -1,87 +1,102 @@
 ---
-title: "第一次写 Kubernetes YAML：亲手创建一个 Pod，再把它删掉"
-date: "2026-11-24"
-summary: "复制一份最小 Pod 配置，运行课程 API，查看它的状态和日志。"
-series: "Docker 与 Kubernetes"
-order: 21
-tags: ["Kubernetes 入门", "Docker"]
-level: "Kubernetes 入门"
-prerequisites: ["k8s-local-cluster"]
-goals: ["创建 Pod，读懂 YAML 的主要字段，并从状态和事件定位问题。"]
+title: 第一个 YAML：把 Pod 的每一行写明白
+date: '2026-11-24'
+summary: 学会 apiVersion、kind、metadata、spec、标签和命名空间，用文件创建并检查一个 Nginx Pod。
+series: Docker 与 Kubernetes
+order: 27
+tags:
+  - Kubernetes
+level: Kubernetes 入门
+prerequisites:
+  - k8s-local-cluster
+goals:
+  - 学会 apiVersion、kind、metadata、spec、标签和命名空间，用文件创建并检查一个 Nginx Pod。
 ---
+上一课用一条命令创建了网页。命令可以试验，但过两周谁还记得当时用了哪个镜像、哪些参数？YAML 把这些设置保存成文件。我们先写一个只有一个容器的 Pod，再用命令检查它。
 
-上一课已经搭好了本地集群，也把 API 镜像交给 kind 节点。这一课只创建一个单独的 Pod，方便认识 Kubernetes 清单的基本样子。Pod 可以先简单理解成 Kubernetes 安排程序运行的“小盒子”；这次只有一个 API 容器。
+## YAML 是配置文件，不是另一种脚本
 
-## 先准备一份清单文件
+它用缩进表示层级，使用空格，不使用 Tab；`-` 表示列表元素；冒号后通常留一个空格。下面的 `containers` 是列表，虽然只有一个容器，也要写 `- name`。在实验包根目录打开 `basics/pod.yaml`：
 
-确认终端还在解压后的 `container-course` 文件夹。用记事本或 VS Code 新建 `pod-demo.yaml`，把下面内容完整复制进去并保存。注意 YAML 的缩进只能用空格，不能用 Tab。
-
-~~~yaml
+~~~yaml file=basics/pod.yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: pod-demo
-  namespace: container-course
+  name: first-web
+  namespace: lab
   labels:
-    app: pod-demo
+    app: first-web
 spec:
   containers:
-    - name: api
-      image: container-course-api:local
-      imagePullPolicy: IfNotPresent
+    - name: nginx
+      image: nginx:1.28-alpine
       ports:
-        - containerPort: 8080
+        - name: http
+          containerPort: 80
 ~~~
 
-每段先知道它的用途：`kind` 说这是 Pod；`metadata` 给它起名并贴标签；`spec` 写要运行的镜像。`containerPort` 是告诉读者程序打算用 8080，不会自动把它开放给电脑访问。
+## 这几行分别给谁看
 
-## 先检查 YAML，再创建 Pod
+| 字段 | 表达的意思 | 改错会怎样 |
+| --- | --- | --- |
+| apiVersion | 资源使用的 API 版本，Pod 属于核心组 v1 | 不能把所有资源都写成 apps/v1 |
+| kind | 资源种类，此处是 Pod | 大小写不能随便换 |
+| metadata.name | 这个 Pod 的名字 | 同一 namespace 中同类资源不能重名 |
+| metadata.namespace | 放进 lab | lab 要先存在 |
+| labels | 你定义的标签，供选择器查找 | 标签不匹配时 Service 找不到它 |
+| spec | 你希望它怎样运行 | 由系统尝试实现 |
+| containers[].name | Pod 内部的容器名 | logs、exec 可用它指定容器 |
+| containerPort | 声明容器预期监听的端口 | 不会让程序自动监听，也不会在电脑开端口 |
 
-回到同一个终端。先让集群检查文件，不保存对象；确认没有错误后再真正创建：
+程序有没有监听 80，由 Nginx 自己的配置决定。`status` 是系统记录的观察结果，创建文件里不用自己编 `Running`；写了也不能把一个坏程序变成正常程序。
 
-~~~powershell
-kubectl config current-context
-kubectl apply --dry-run=server -f .\pod-demo.yaml
-kubectl apply -f .\pod-demo.yaml
-kubectl -n container-course get pod pod-demo -o wide
+## 提交前先让 API 检查格式
+
+~~~bash
+kubectl config use-context kind-course
+kubectl apply --dry-run=server -f basics/pod.yaml
+kubectl apply -f basics/pod.yaml
+kubectl -n lab wait --for=condition=Ready pod/first-web --timeout=120s
+kubectl -n lab get pods -l app=first-web -o wide
 ~~~
 
-第一条必须显示 `kind-course`。`dry-run` 成功会提示资源已通过服务器检查；创建后状态会从 Pending、ContainerCreating 变成 Running。若迟迟不变，后面有具体检查命令。
+`--dry-run=server` 让 API 做字段和准入检查，但不保存对象，需要连接集群。`apply -f` 中的 f 是文件。`-l` 是标签选择器；如果返回空列表，先比较 YAML 的标签和值。第二次 apply 没改文件，应显示 unchanged。
 
-## 访问 API 并查看它在运行什么
+## 进入容器，确认真正运行的是什么
 
-打开另一个终端窗口，临时把 Pod 的 8080 端口接到本机 8081。保持这条命令运行，在新终端请求存活检查接口：
-
-~~~powershell
-kubectl -n container-course port-forward pod/pod-demo 8081:8080
+~~~bash
+kubectl -n lab exec first-web -c nginx -- nginx -v
+kubectl -n lab exec first-web -c nginx -- cat /usr/share/nginx/html/index.html
+kubectl -n lab logs first-web -c nginx --tail=20
+kubectl -n lab get pod first-web -o yaml
 ~~~
 
-~~~powershell
-Invoke-RestMethod http://localhost:8081/health/live
-kubectl -n container-course logs pod-demo
-kubectl -n container-course describe pod pod-demo
+`exec` 在已运行的容器内执行命令；`--` 之后是容器命令，不是 kubectl 参数。`logs` 读取标准输出、标准错误，不会自动查所有磁盘日志。最后一条会多出 UID、创建时间、status 等系统字段，别把整段导出结果原样当成日常模板维护。
+
+## 不认识字段时，直接查当前集群
+
+~~~bash
+kubectl api-resources --namespaced=true
+kubectl explain pod.spec.containers.image
+kubectl explain pod.spec.restartPolicy
 ~~~
 
-接口正常会返回 `alive`。`logs` 看应用写出的日志；`describe` 会显示 Pod 当前状态和集群事件。完成后回到 port-forward 窗口按 Ctrl+C。
+`api-resources` 列出服务端支持的资源；`explain` 根据 API 文档解释字段。Pod 默认 `restartPolicy: Always`，容器进程退出后 kubelet 通常会重启容器；但是删除整个独立 Pod 后，没有控制器替你新建 Pod。这两种“重启”必须分开理解。
 
-## 故意删掉它，看看发生什么
+## 改文件为什么有时提示不允许更新
 
-这是直接创建的 Pod，没有其他对象承诺要帮你补回来。删除后它就消失：
+Pod 的很多字段创建后不能原地修改，例如随意添加普通容器或改变卷配置。为了练习可以删除再创建，但生产服务应交给 Deployment 等控制器，通过更新 Pod 模板替换实例。下一课就做这个动作。
 
-~~~powershell
-kubectl -n container-course delete -f .\pod-demo.yaml
-kubectl -n container-course get pods
+~~~bash
+kubectl -n lab delete pod first-web
+kubectl apply -f basics/pod.yaml
+kubectl -n lab wait --for=condition=Ready pod/first-web --timeout=120s
+kubectl -n lab delete pod first-web
 ~~~
 
-列表里不应再有 `pod-demo`。下一课会让 Deployment 来管理副本，届时删掉一个 Pod，它会再创建一个新的。这就是为什么实际服务通常不直接管理孤零零的 Pod。
+两次创建虽然名字相同，UID 已经不同。最后删除本课 Pod，让下一课从干净状态开始。遇到 YAML 报错先看行号和缩进；遇到 `Forbidden` 再看权限；字段校验失败和权限不足不是同一种问题。
 
-## 如果没成功，先看 Events
+## 继续阅读
 
-Pod 卡在 `Pending` 时运行 `kubectl -n container-course describe pod pod-demo`，看最下面 Events；`ImagePullBackOff` 通常表示节点拿不到指定镜像，本课程要先执行上一课的 `kind load docker-image`。若提示 namespace 不存在，重新执行 `kubectl apply -f k8s/00-namespace.yaml`。如果 YAML 解析失败，检查缩进、冒号和文件是否误存成 `pod-demo.yaml.txt`。
-
-练习：把文件里的容器名 `api` 改成 `web` 再创建一次，观察 Pod 名字仍是 `pod-demo`。对象名和容器名是两个不同字段。完成后删掉 Pod，避免课程里留下孤立资源。
-
-## 参考资料
-
-- [Pod 是什么](https://kubernetes.io/docs/concepts/workloads/pods/)
-- [创建 Pod 的任务说明](https://kubernetes.io/docs/tasks/run-application/run-single-instance-stateful-application/)
+- [Pod 概念](https://kubernetes.io/zh-cn/docs/concepts/workloads/pods/)
+- [对象管理](https://kubernetes.io/zh-cn/docs/concepts/overview/working-with-objects/)

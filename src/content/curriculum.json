@@ -104,10 +104,10 @@
   {
     "name": "Docker 与 Kubernetes",
     "id": "containers",
-    "description": "从一台电脑上的容器开始，把同一个服务装进镜像、部署到集群，再学会排错和维护。",
+    "description": "从 Docker 概念、命令与常用软件开始，完成 Java + MySQL + Redis 实战，再学习 Kubernetes。",
     "audience": "会使用电脑和终端的新手，也适合想补齐容器基础的开发者",
     "outcome": "能构建安全的容器镜像、用 Kubernetes 部署服务，并理解日常排错和生产运行的关键环节。",
-    "start": "docker-install",
+    "start": "docker-why",
     "core": true,
     "inLearn": false,
     "recommended": []

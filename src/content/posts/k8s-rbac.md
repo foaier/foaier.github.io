@@ -1,102 +1,105 @@
 ---
-title: 别把 kubeconfig 发给所有同事：用 RBAC 给刚刚好的权限
+title: 谁能看日志，谁能删服务：用 RBAC 做一次最小授权
 date: '2026-11-24'
-summary: 为课程创建一个只读 Pod 的身份，用 auth can-i 检查权限边界。
+summary: 给 ServiceAccount 只读 Pod 和日志权限，用 can-i 及 impersonation 验证允许与拒绝。
 series: Docker 与 Kubernetes
-order: 32
+order: 41
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
-  - k8s-gateway-api
+  - k8s-architecture
 goals:
-  - 为 ServiceAccount 限定 namespace 内的 Pod 读取权限，并验证拒绝操作。
+  - 给 ServiceAccount 只读 Pod 和日志权限，用 can-i 及 impersonation 验证允许与拒绝。
 ---
+“连得上集群”不等于“应该能删所有资源”。认证回答你是谁，授权回答能做什么，准入控制再检查这次操作是否符合规则。RBAC 负责授权，不负责让两个 Pod 的网络隔离。
 
-能跑 kubectl 的 kubeconfig 往往包含实实在在的身份凭证，有的还能改整个生产集群。把它发到聊天群方便排错，相当于发了一把未标用途的钥匙。先说明谁、在什么范围、能干什么。
+## 四种 RBAC 对象怎么配合
 
-## 身份、角色和绑定怎样连起来
+Role 定义一个 namespace 里的权限；ClusterRole 定义可复用或集群范围的权限。RoleBinding 在自己的 namespace 绑定 Role 或 ClusterRole；ClusterRoleBinding 则把 ClusterRole 权限绑定到集群范围。RoleBinding 引用 ClusterRole，不会自动得到所有 namespace 的权限。
 
-RBAC 基本组合是 Role 或 ClusterRole 加 RoleBinding 或 ClusterRoleBinding，再授予 User、Group 或 ServiceAccount。Role 只管一个 namespace，适合本课读 Pod。权限是累加的；宽泛通配符还会把未来新增资源和动作一起开放。服务账号不应直接沿用管理员用户配置。
+本课使用 ServiceAccount 作为身份，避免先引入外部账号系统。普通用户通常来自证书、OIDC 等认证方式，K8s 没有一个让你 `kubectl create user` 就建立登录密码的通用 User 资源。
 
-## 创建一个只读课程 Pod 的身份
+## 建一个只能看 Pod 和日志的身份
 
-先把 Role、ServiceAccount 和 RoleBinding 写成清单。Role 只读 container-course 里的 Pod；auth can-i --as 做模拟检查，当前身份还需 impersonate 权限，所以权限不足不代表课程 Role 错。
-
-~~~~yaml
+~~~yaml file=security/reader.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: course-reader
-  namespace: container-course
+  name: pod-reader
+  namespace: lab
+automountServiceAccountToken: false
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: pod-reader
-  namespace: container-course
+  name: read-pods
+  namespace: lab
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    resources: [pods, pods/log]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: course-reader-pods
-  namespace: container-course
+  name: read-pods
+  namespace: lab
 subjects:
   - kind: ServiceAccount
-    name: course-reader
-    namespace: container-course
+    name: pod-reader
+    namespace: lab
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: pod-reader
-~~~~
-
-保存为 rbac-readonly.yaml，确认连接的是练习集群后应用：
-
-~~~powershell
-kubectl config current-context
-kubectl apply -f rbac-readonly.yaml
-kubectl auth can-i watch pods -n container-course --as=system:serviceaccount:container-course:course-reader
-kubectl auth can-i create pods -n container-course --as=system:serviceaccount:container-course:course-reader
-kubectl auth can-i list secrets -n container-course --as=system:serviceaccount:container-course:course-reader
+  name: read-pods
 ~~~
 
-## 用 can-i 验证允许和拒绝的权限
-
-预期第一项 yes、后两项 no。--as 做身份模拟，当前操作者还需 impersonate 权限；若这一步报 Forbidden，先确认当前身份是否可以模拟，不要因此扩大 course-reader 权限。
-
-~~~powershell
-kubectl auth can-i list pods -n container-course --as=system:serviceaccount:container-course:course-reader
-kubectl auth can-i delete pods -n container-course --as=system:serviceaccount:container-course:course-reader
-kubectl auth can-i get secrets -n container-course --as=system:serviceaccount:container-course:course-reader
+~~~bash
+kubectl apply -f security/reader.yaml
+kubectl auth can-i list pods -n lab --as=system:serviceaccount:lab:pod-reader
+kubectl auth can-i delete pods -n lab --as=system:serviceaccount:lab:pod-reader
+kubectl auth can-i get secrets -n lab --as=system:serviceaccount:lab:pod-reader
+kubectl auth can-i list pods -n kube-system --as=system:serviceaccount:lab:pod-reader
 ~~~
 
-## 一个请求要先经过认证，再经过授权
+预期依次 yes、no、no、no。`apiGroups: [""]` 指核心 API 组，不是遗漏；`pods/log` 是子资源，允许看 Pod 不自动等于允许看日志。动词 create、patch、delete 的范围应按任务给，不要图方便写全 `*`。
 
-认证回答“请求是谁发的”；RBAC 鉴权回答“这个身份对这个资源能做什么”；准入控制器还可以拒绝不符合策略的对象。Role/ClusterRole 描述规则，RoleBinding/ClusterRoleBinding 把规则授予 User、Group 或 ServiceAccount。
+## 真的用这个身份发一次请求
 
-| 规则部分 | 例子 | 常见过宽配置 |
-|---|---|---|
-| apiGroups | 空字符串表示核心 API 组 | 把所有 API 组都授权 |
-| resources | pods、configmaps | 用 * 覆盖所有资源 |
-| verbs | get、list、watch | 给普通读者 delete、update |
-| namespace scope | Role + RoleBinding | 误用 ClusterRoleBinding 扩到全集群 |
+~~~bash
+kubectl -n lab get pods --as=system:serviceaccount:lab:pod-reader
+kubectl -n lab logs deployment/web --tail=5 --as=system:serviceaccount:lab:pod-reader
+~~~
 
-list/watch Secret 通常等价于读取许多秘密。权限不能只看角色名字，要检查每条规则的资源范围、子资源、动词和绑定范围。
+第二条可能被拒绝：客户端先要读 Deployment，再找它下面的 Pod，但角色只允许 pods。改为直接指定 Pod：
 
-## 默认 ServiceAccount 与应用身份
+~~~bash
+lab_pod=$(kubectl -n lab get pods -l app=web -o jsonpath='{.items[0].metadata.name}')
+kubectl -n lab logs "$lab_pod" --tail=5 --as=system:serviceaccount:lab:pod-reader
+kubectl -n lab get secrets --as=system:serviceaccount:lab:pod-reader
+~~~
 
-Pod 未指定 serviceAccountName 时通常使用 namespace 的 default ServiceAccount；默认配置会自动挂载 API 凭据，除非 Pod 或 ServiceAccount 显式设置 automountServiceAccountToken: false。课程 API 清单已关闭 token 自动挂载。应用不需要访问 Kubernetes API 时也应关闭；需要时再绑定专用身份和最小权限。
+Pod 日志能读，Secret 请求 Forbidden，说明权限边界生效。`--as` 是管理员模拟身份，需要 impersonate 权限；它不是普通用户绕过登录的方法，也没把你的管理员 kubeconfig 改成另一个账号。
 
-集群里谁能创建 RoleBinding 也很关键：能给自己绑定更强权限的用户可能绕过原本的业务角色边界。审计权限时同时查看 Role、ClusterRole、两类 Binding 和实际身份来源。
+## kubeconfig、Token 和密码不要混着传
 
-## 参考资料
+kubeconfig 可能包含地址、CA、客户端证书和私钥，转发文件可能等于转发身份。Pod 使用 projected token 时通常具备期限和受众约束，不应再为方便手工制作永不过期的管理员 Token。应用不访问 API 时设置 `automountServiceAccountToken: false`，减少无用凭证暴露。
 
-- [RBAC 授权](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
-- [控制访问](https://kubernetes.io/docs/concepts/security/controlling-access/)
+注意：能创建 Pod 的人，可能通过挂载 Secret、指定高权限 ServiceAccount 等方式扩大实际访问面。因此最小授权还要配合准入策略，不能只看一条 `get secrets=no` 就宣称凭证绝对安全。
+
+## 权限被拒绝，先看具体动词和资源
+
+~~~bash
+kubectl auth can-i --list -n lab --as=system:serviceaccount:lab:pod-reader
+kubectl -n lab get role read-pods -o yaml
+kubectl -n lab get rolebinding read-pods -o yaml
+kubectl delete -f security/reader.yaml
+~~~
+
+检查 namespace、subject 名、apiGroup、资源复数和子资源。不需要因为 get 被拒绝就授予 cluster-admin。日志也可能含敏感业务数据，只读并不意味着可以对所有人公开。
+
+## 继续阅读
+
+- [RBAC 授权](https://kubernetes.io/zh-cn/docs/reference/access-authn-authz/rbac/)
+- [ServiceAccount](https://kubernetes.io/zh-cn/docs/concepts/security/service-accounts/)

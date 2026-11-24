@@ -1,108 +1,134 @@
 ---
-title: kubectl logs 只看得到眼前：生产日志和指标还要往哪里送
+title: 看见集群在做什么：Metrics Server、Prometheus 和 Grafana
 date: '2026-11-24'
-summary: 区分日志、指标、链路追踪与事件，理解 Kubernetes 自带能力的边界。
+summary: 安装资源指标与监控栈，查询真实指标、检查采集目标，并验证一条测试告警。
 series: Docker 与 Kubernetes
-order: 37
+order: 47
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
+  - k8s-helm-kustomize
   - k8s-troubleshooting
 goals:
-  - 取课程 API 的结构化日志与资源指标，并设计进入集中平台的路径。
+  - 安装资源指标与监控栈，查询真实指标、检查采集目标，并验证一条测试告警。
 ---
+日志告诉你某次请求发生了什么，指标告诉你一段时间的趋势，事件记录调度、拉镜像等集群动作。三者都要看。Metrics Server 主要提供短期资源指标给 top 和 HPA，它不是长期监控数据库。
 
-Pod 重建后本机还能看到哪些旧日志？用户说页面慢，我们能知道是数据库还是外部请求在等吗？临时 `kubectl logs` 适合开始排查，服务长大后就需要持续保存、可关联的数据。
+## 先让 kubectl top 有数据
 
-## 四类信号分别回答什么问题
+在 kind-course 执行。固定安装 Metrics Server；kind 的 kubelet 证书在这套本地实验中可能不满足验证要求，所以只对这套学习集群加跳过 kubelet 证书校验的参数。
 
-日志记录离散事件；指标聚合时间序列，用于趋势和容量；分布式追踪把一次请求跨服务的耗时串起来；Events 反映集群对象变化，保存时间通常有限。它们回答的问题不同。容器通常向 stdout/stderr 写日志，节点采集器再送集中存储。
-
-Metrics Server 提供资源指标 API 与 HPA 所需的基础数据，不是带历史曲线的完整监控。Prometheus、OpenTelemetry 或云产品要按环境部署采集端、设置脱敏、留存和访问控制。课程 API 没有完整 trace 仪表，不要声称 `/health` 就是生产监控。
-
-## 先看课程 API 已有的日志和指标
-
-先读每个 API 副本最近日志，再检查 `kubectl top`。若 Metrics API 未装，只记录依赖缺失，不要为了让命令变绿就在共享集群临时安装未知 Chart。
-
-~~~powershell
-kubectl -n container-course logs deployment/course-api --all-pods=true --prefix --tail=100
-kubectl -n container-course get pods -l app=course-api
-kubectl -n container-course top pods
-kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
-~~~
-
-## 一个超时告警，应该怎样顺着看
-
-假设用户请求持续变慢，先看请求量、错误比例和延迟分位数，而不是一上来找某个日志关键字。请求量突然上升、CPU 同时升高，可能需要扩容；请求量没变但数据库等待时间上升，应优先看数据库连接与慢查询。两个现象可以一起发生，要把同一个时间窗口对齐。
-
-再挑一条慢请求的 trace ID，检查它在哪个调用上停留最久，用相同 ID 去日志中找异常和关键业务事件。若当前程序没有输出关联 ID、没有接入 tracing，这条调查链会断掉；因此要在服务正常时把采集准备好，而不是事故中临时到处加日志。
-
-| 信号 | 适合回答的问题 | 不能独自说明什么 |
-| --- | --- | --- |
-| 请求延迟直方图 | 最近一段时间有多少慢请求 | 某一次慢在哪一行代码 |
-| 容器 CPU/内存 | 是否接近容量、是否发生 OOM | 业务返回值是否正确 |
-| 带关联 ID 的日志 | 某次请求发生了什么 | 整个系统的长期统计分布 |
-| 分布式 trace | 一次请求跨服务的耗时分布 | 未采样请求的完整经历 |
-
-监控标签要用路由模板，例如 /visits/{id}，不要把每个真实用户 ID 或完整 URL 都变成指标标签，否则时间序列会不断增长。日志留存也不是越久越好，保存成本、查询成本、访问权限和业务要求要一起算。
-
-课程 API 目前只提供普通 ASP.NET 请求日志、健康接口和节点资源观测。接入 OpenTelemetry、Prometheus 或云监控时，要另外启用应用指标导出与 trace instrumentation；平台有采集器，不代表应用自动输出了全部信号。
-
-## 比较节点和 Pod 的资源，再筛告警
-
-Pod 指标回答单个工作负载用了多少，节点指标回答机器还剩多少空间。最后只筛 Warning Events；需要长期趋势时再接入指标与日志系统，因为集群 Events 会过期。
-
-~~~powershell
+~~~bash
+kubectl config use-context kind-course
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.0/components.yaml
+kubectl -n kube-system patch deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
+kubectl get apiservice v1beta1.metrics.k8s.io
 kubectl top nodes
-kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,LAST_EXIT:.status.containerStatuses[0].lastState.terminated.reason'
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+kubectl top pods -n lab
 ~~~
 
-## 集群监控通常由几种组件拼起来
+第一次采样需要几十秒，刚就绪就查询可能返回指标尚不可用。APIService 应 Available=True。若仍失败，查 metrics-server 日志中的证书、连接和授权错误。生产环境应配置正确 kubelet 服务证书和访问网络，不能照搬 insecure 参数掩盖证书问题。
 
-| 组件/数据源 | 提供什么 | 不能单独替代什么 |
-|---|---|---|
-| kubelet / cAdvisor | 节点和容器资源样本 | 应用业务成功率与完整调用链 |
-| Metrics Server | 近期资源指标 API，供 kubectl top、部分 HPA 使用 | 历史时序库和长期容量分析 |
-| kube-state-metrics | Kubernetes 对象状态的 Prometheus 指标 | 容器 CPU/内存采集 |
-| Prometheus | 抓取并保存时序指标、按规则告警 | 日志全文检索和分布式追踪 |
-| Grafana | 查询与展示数据源中的面板 | 数据采集与告警路由本身 |
-| OpenTelemetry Collector | 接收、处理和转发 traces/metrics/logs | 自动替应用生成正确埋点 |
+## Prometheus 抓指标，Grafana 把指标画出来
 
-这张表回答“指标从哪来”，不是一份可直接安装的生产架构。生产部署还需为控制器和采集器安排资源、持久存储、升级策略、访问控制和多副本；监控系统自身也要监控。
+Prometheus 定时抓取目标的 `/metrics`，存为带标签的时间序列；Grafana 查询并展示；Alertmanager 处理告警分组和通知；kube-state-metrics 把 Deployment、Pod 等对象状态变成指标。应用的 QPS、业务错误率还要应用自身暴露，不能仅靠安装监控就自动获得全部业务指标。
 
-## 从节点采集到告警大致怎么走
+本课约需额外几 GiB 内存，先卸载不用的入口或仓库实验。实验包监控 values 关闭单控制平面下不便直接采集的几个端点，避免把目标 DOWN 混成应用故障：
 
-~~~text
-API/节点/容器 -> exporter 或 OpenTelemetry SDK
-             -> collector / Prometheus scrape
-             -> 时序库和日志存储
-             -> Grafana 查询 / Alertmanager 路由
-             -> 值班人按 runbook 处理
+~~~yaml file=monitoring/values.yaml
+grafana:
+  adminPassword: local-grafana-only
+  persistence:
+    enabled: false
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
 ~~~
 
-Metrics Server 的数据保留时间短，适合近期资源查询；Prometheus 通过 scrape 与规则做历史趋势；应用要加 SDK 或 exporter 才能提供请求延迟、错误率和 trace。只安装 Grafana 而没有数据源，仪表盘不会凭空产生指标。
-
-## 先看资源，再定义一次可行动的告警
-
-在资源 API 可用的课程集群中看 Pod 和 Node 指标，再对照 Warning Events。若后续接 Prometheus，常见的 PromQL 形态是按时间窗口计算请求错误比例或容器 CPU 使用率；指标名取决于安装的 exporter 和应用埋点，先在 Prometheus 中查实际序列再写规则。
-
-~~~powershell
-kubectl top pods -n container-course --containers
-kubectl top nodes
-kubectl -n container-course get pods -o wide
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm upgrade --install monitor prometheus-community/kube-prometheus-stack --version 79.0.0 -n monitoring --create-namespace -f monitoring/values.yaml --wait --timeout 10m
+kubectl -n monitoring get pods
+kubectl -n monitoring get services
+kubectl -n monitoring port-forward service/monitor-kube-prometheus-st-prometheus 9090:9090
 ~~~
 
-一个有用的告警应说明用户影响、触发窗口、值班人和止损步骤。例如“API 5xx 比例连续 5 分钟超过 SLO”比“某 Pod CPU 大于 80%”更直接；CPU 适合作为原因线索，不一定代表用户正在受影响。
+浏览器打开 `http://127.0.0.1:9090`。这是临时本机访问，不向公网开放。去 Targets 查看哪些采集目标 UP，再到查询页执行以下 PromQL：
 
-避免把用户 ID、完整 URL 或请求 ID 放进 Prometheus 标签，这些高基数维度会让时间序列数量快速增长。它们更适合结构化日志或 trace 属性，并且仍需脱敏与访问控制。
+~~~promql
+up
+sum(kube_pod_info{namespace="lab"})
+kube_deployment_status_replicas_available{namespace="lab",deployment="web"}
+sum(rate(container_cpu_usage_seconds_total{namespace="lab",container!="",container!="POD"}[5m]))
+~~~
 
-## 参考资料
+up 为 1 说明采集成功，不代表业务健康；CPU rate 需要积累样本，不能刚安装就期望完整五分钟曲线。高基数标签如用户 ID、订单号会撑爆时间序列数量，别把每个业务字段都加到指标标签里。
 
-- [Kubernetes 日志架构](https://kubernetes.io/docs/concepts/cluster-administration/logging/)
-- [系统指标](https://kubernetes.io/docs/concepts/cluster-administration/system-metrics/)
-- [Prometheus](https://prometheus.io/docs/introduction/overview/)
+## 看 Grafana，再制造一个可控告警
+
+另开终端执行：
+
+~~~bash
+kubectl -n monitoring port-forward service/monitor-grafana 3000:80
+~~~
+
+访问 `http://127.0.0.1:3000`，实验账号 admin，密码 local-grafana-only；在 Dashboards 中找 Kubernetes 工作负载看板。这个公开密码只用于本机临时练习，正式安装需要换成受保护凭证。
+
+~~~yaml file=monitoring/alert.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lesson-alert
+  namespace: monitoring
+  labels:
+    release: monitor
+spec:
+  groups:
+    - name: lesson
+      rules:
+        - alert: LessonAlwaysFiring
+          expr: vector(1)
+          for: 1m
+          labels: {severity: info}
+          annotations:
+            summary: 本地告警链路实验，请在完成后删除
+~~~
+
+~~~bash
+kubectl apply -f monitoring/alert.yaml
+kubectl -n monitoring get prometheusrule lesson-alert
+~~~
+
+在 Prometheus Alerts 页应先 Pending 后 Firing。规则带 release=monitor，才能被本安装默认规则选择器选中。这里验证规则评估和告警状态，没有配置邮箱或聊天通知，不会给任何人发消息。
+
+## 查不到数据，先确认采集链路
+
+应用指标不存在就查应用是否暴露；目标 DOWN 就看 Targets 的 Last Error；ServiceMonitor 没生效就查 label selector、namespace 和命名端口。Grafana 空图不一定是 Grafana 坏了，先在 Prometheus 查相同指标。
+
+用完停止两个转发终端，然后：
+
+~~~bash
+kubectl delete -f monitoring/alert.yaml
+helm uninstall monitor -n monitoring
+kubectl delete namespace monitoring
+~~~
+
+保留 Metrics Server 给下一课 HPA 使用。实验监控不持久化，卸载会丢历史；生产要另外决定保留周期、磁盘、备份和通知策略，不应照抄这个轻量 values。
+
+## 继续阅读
+
+- [资源指标管道](https://kubernetes.io/zh-cn/docs/tasks/debug/debug-cluster/resource-metrics-pipeline/)
+- [Prometheus 查询](https://prometheus.io/docs/prometheus/latest/querying/basics/)

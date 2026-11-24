@@ -1,115 +1,122 @@
 ---
-title: 写第一个 Dockerfile：把 .NET 小服务做成镜像
+title: 写第一个 Dockerfile：把自己的网页做成镜像
 date: '2026-11-24'
-summary: 用 Dockerfile 描述 .NET API 如何编译、发布和启动。
+summary: 用两个文件完成 build 和 run，再实验 ENTRYPOINT 与 CMD。
 series: Docker 与 Kubernetes
-order: 6
+order: 13
 tags:
-  - Docker 基础
   - Docker
-  - Kubernetes
-level: Docker 基础
+  - Docker 实战
+level: Docker 实战
 prerequisites:
-  - docker-debug
+  - docker-network
 goals:
-  - 构建并运行课程 API 镜像，区分 build 时和 run 时执行的事情。
+  - 独立构建网页镜像，解释构建与运行时指令。
 ---
+前面用过别人做好的镜像，也用 commit 保存过临时改动。现在自己写一份 Dockerfile：告诉 Docker 选什么基础环境、复制哪些文件、容器启动时运行什么。目标很具体：把一份自己的 HTML 做成镜像，换个容器启动后仍能看到它。
 
-`docker run` 能启动别人的镜像，但工作中总有一天要把自己的程序装进去。Dockerfile 就是一份按顺序执行的构建说明：选基础镜像、把文件复制进去、执行构建命令、声明启动方式。它不是在容器运行时临时执行的脚本，而是构建镜像的配方。
+准备：Docker 和 Bash，不需要 Java、.NET 或前端框架。文件只放在本节新建目录，不修改其他项目。
 
-## 先拿到课程源码
+## 建一个只有两个文件的项目
 
-先[下载课程源码](/downloads/container-course.zip)，解压后进入 `container-course` 文件夹。如果你克隆了整站仓库，则进入 `examples/container-course/`。这个目录下应该同时看到 Dockerfile、compose.yaml 和 src。
-
-第一阶段使用 SDK 镜像编译，最后阶段用 ASP.NET Runtime 镜像运行。今天先关注最短路径，后面会分别解释构建上下文、缓存和多阶段构建。下载包中的 Dockerfile 已可直接使用，不需要手工抄一份才开始。
-
-## 构建镜像，再启动 API
-
-在容器课程目录运行构建，再启动服务。发布端口时绑定到 127.0.0.1，避免把本机练习服务暴露给局域网。镜像构建第一次要还原 NuGet 包，可能比后续构建慢。
-
-~~~powershell
-docker build -t container-course-api:local .
-docker run --rm --name course-api -p 127.0.0.1:8080:8080 container-course-api:local
+~~~bash
+mkdir -p ~/docker-practice/first-image
+cd ~/docker-practice/first-image
+cat > index.html <<'EOF'
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>我的第一个镜像</title>
+<h1>这个网页是我打包的</h1>
+<p>版本：v1</p>
+</html>
+EOF
+cat > Dockerfile <<'EOF'
+FROM nginx:stable-alpine
+COPY index.html /usr/share/nginx/html/index.html
+EXPOSE 80
+EOF
+ls
 ~~~
 
-## 把 Dockerfile 一行一行对上实际工作
+ls 应看到 `Dockerfile` 和 `index.html`。Dockerfile 没有 `.txt` 后缀。基础镜像已经定义了启动 Nginx 的方式，所以这个最小文件不需要重复写 CMD。
 
-~~~dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-WORKDIR /src
-COPY src/ContainerCourse.Api/ContainerCourse.Api.csproj src/ContainerCourse.Api/
-RUN dotnet restore src/ContainerCourse.Api/ContainerCourse.Api.csproj
-COPY . .
-RUN dotnet publish src/ContainerCourse.Api/ContainerCourse.Api.csproj --configuration Release --no-restore --output /app/publish /p:UseAppHost=false
+## build 和 run 是两个不同动作
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
-WORKDIR /app
-ENV ASPNETCORE_HTTP_PORTS=8080
-EXPOSE 8080
-COPY --from=build --chown=$APP_UID:$APP_UID /app/publish .
-USER $APP_UID
-ENTRYPOINT ["dotnet", "ContainerCourse.Api.dll"]
+~~~bash
+docker build -t foaier-web:v1 .
+docker run --name first-image-web -d -p 127.0.0.1:8087:80 foaier-web:v1
+curl http://localhost:8087
 ~~~
 
-FROM 选构建环境，WORKDIR 决定后面的相对路径。前一个 COPY 只带项目声明，restore 还原依赖，第二个 COPY 才把源代码带进来。publish 输出可运行的文件；最终镜像只拿这份输出和运行时，不带完整 SDK。
+build 把文件加工成镜像；`-t` 给结果命名；最后的点指定当前目录作为构建输入。run 才创建容器并启动 Nginx。浏览器打开 `http://localhost:8087`，应显示“这个网页是我打包的”。
 
-USER 使用 .NET 官方 Linux 镜像提供的非 root UID。EXPOSE 只是端口说明，真正发布到电脑要靠 docker run -p。ENTRYPOINT 在容器启动时执行，RUN 则在构建时执行；把两者混用就会出现“构建时服务一直不退出”这类问题。
+镜像构建完成不代表任何服务已启动。反过来，改了本地 HTML 也不会自动改变已经构建的镜像，这与前面的 bind mount 实验不同。
 
-文件都齐了再运行本课构建命令。镜像构建时不连数据库，所以 build 成功不会保证 /visits 能用；数据库在后面的 Compose 章节接上。
+## 常用指令按发生时间来记
 
-## 从镜像记录确认构建结果
-
-刚才的构建命令用 `-t` 给镜像起了名字，末尾的点表示以当前目录作为构建上下文。现在用 inspect 看镜像 ID 和体积，再用 `image ls` 确认标签留在本机。运行阶段的日志已经在上面前台启动时看过；按 Ctrl+C 后，`--rm` 会顺便清掉那次容器实例。
-
-~~~powershell
-docker image inspect container-course-api:local --format 'ID={{.Id}} size={{.Size}}'
-docker image ls container-course-api
-~~~
-
-## Dockerfile 指令分别改变什么
-
-| 指令 | 改变的内容 | 常见误用 |
+| 指令 | 做什么 | 示例或说明 |
 |---|---|---|
-| FROM | 选构建阶段的基础镜像 | 不锁定版本，导致未来重建内容变化 |
-| WORKDIR | 后续相对路径的工作目录 | 假设当前目录总是根目录 |
-| COPY | 把构建上下文文件放进镜像 | 把 .git、bin、obj 和密钥一起复制 |
-| RUN | 构建时执行命令并形成镜像层 | 把只需在运行时做的事写进构建 |
-| ARG / ENV | 构建参数 / 运行时环境变量 | 用 ARG 假装安全保存密码 |
-| EXPOSE | 声明镜像预期使用的容器端口 | 误以为它会把端口发布到宿主机 |
-| USER | 指定后续进程的运行身份 | 长期以 root 运行无必要的业务进程 |
-| ENTRYPOINT / CMD | 定义启动程序及默认参数 | 用 shell 字符串导致信号传递不清楚 |
+| FROM | 选择基础镜像/开始构建阶段 | `FROM nginx:stable-alpine` |
+| WORKDIR | 改后续命令的工作目录 | `WORKDIR /app`，目录不存在时创建 |
+| COPY | 从构建输入复制文件 | `COPY index.html /目标路径` |
+| RUN | 构建时执行 | 安装依赖、编译程序 |
+| ENV | 保存环境变量 | `ENV APP_MODE=demo`，运行时仍可覆盖 |
+| ARG | 接收构建参数 | 构建时使用，不适合密码 |
+| USER | 指定后续进程身份 | 非 root 运行须配好文件权限 |
+| EXPOSE | 记录端口说明 | 不等于 `-p` 发布端口 |
+| ENTRYPOINT / CMD | 定义运行时程序和默认参数 | 不在 build 时启动服务 |
+| LABEL | 镜像说明信息 | 替代旧的 MAINTAINER 指令 |
 
-一个多阶段 Dockerfile 会把 SDK 和编译工具留在 build 阶段，只把发布后的程序复制到 runtime 阶段。这样不是把依赖藏起来，而是让运行镜像只包含服务启动所需文件。
+指令通常大写方便阅读；不要把“每一行都等于一个文件层”当成严格规则，ENV、CMD 等也可能只改变镜像元数据。普通文件复制优先 COPY，只有明确需要 ADD 的下载或解包能力时再用 ADD。
 
-## 读懂课程里的 .NET 多阶段 Dockerfile
+## 单独做个 ENTRYPOINT 和 CMD 小实验
 
-下面的命令在解压后的 container-course 目录执行。Dockerfile 先复制项目文件并 restore，再复制源码 publish；后续只把 publish 目录复制进 ASP.NET runtime 镜像。先看每个阶段的基础镜像与产物去向，再运行构建。
+在同目录创建第二份配方，不覆盖网页 Dockerfile：
 
-~~~powershell
-docker build --progress=plain -t container-course-api:lesson .
-docker image inspect container-course-api:lesson --format 'size={{.Size}} arch={{.Architecture}}'
-docker image history container-course-api:lesson
-docker run --rm -p 127.0.0.1:8089:8080 container-course-api:lesson
+~~~bash
+cat > Dockerfile.echo <<'EOF'
+FROM alpine:3.22
+ENTRYPOINT ["echo"]
+CMD ["hello"]
+EOF
+docker build -f Dockerfile.echo -t foaier-echo:v1 .
+docker run --rm foaier-echo:v1
+docker run --rm foaier-echo:v1 docker
+docker run --rm --entrypoint sh foaier-echo:v1 -c 'echo replaced-entrypoint'
 ~~~
 
-另开终端请求 http://localhost:8089/health/live。看到响应说明运行时镜像含有应用发布文件并能启动；它不证明数据库配置有效，因为这个单容器实验没有启动 PostgreSQL。停止前先记录启动日志，再在原终端按 Ctrl+C。
+依次输出 hello、docker、replaced-entrypoint。第二次 run 的参数替换 CMD，保留 echo；第三次通过 `--entrypoint` 替换了入口。JSON 数组形式会直接启动指定程序，避免多一层 shell 带来的信号转发问题。
 
-## ENTRYPOINT 与 CMD 的差别会影响启动行为
+## 改网页，为什么刷新没变化
 
-Exec form 例如 ENTRYPOINT ["dotnet", "ContainerCourse.Api.dll"] 会让 dotnet 作为容器主进程，Docker 可以把停止信号发给它。Shell form 会多一层 shell，信号和参数转发可能不同。ENTRYPOINT 通常定义固定程序，CMD 提供默认参数；运行时在 docker run 后加参数，会替换 CMD 的默认参数。
+把 index.html 的 v1 改成 v2 后，先刷新旧网页：它仍是旧内容。要更新，构建新标签并新建容器：
 
-~~~powershell
-docker run --rm container-course-api:lesson --help
-docker run --rm --entrypoint dotnet container-course-api:lesson --info
+~~~bash
+sed 's/版本：v1/版本：v2/' index.html > index.next.html
+mv index.next.html index.html
+docker build -t foaier-web:v2 .
+docker stop first-image-web
+docker rm first-image-web
+docker run --name first-image-web -d -p 127.0.0.1:8087:80 foaier-web:v2
+curl http://localhost:8087
 ~~~
 
-第一条是否能显示帮助取决于应用有没有实现该选项，重点是观察参数被传给默认入口；第二条临时覆盖入口，查看镜像中的 dotnet runtime。诊断完成后别把临时 entrypoint override 写进正式部署配置。
+现在应看到 v2。线上发布会保留旧版本和验收过程，不是覆盖同一个 latest 后祈祷机器自动更新。
 
-## 安全和可复现的几个检查点
+## 文件找不到和端口冲突如何修
 
-基础镜像优先选受维护的官方镜像，并按团队更新策略固定版本；高保证场景再记录 digest。不要把私钥、连接密码写进 Dockerfile 的 ARG 或 ENV，也不要将宿主机路径假定为固定值。构建完成后检查最终镜像的 USER、入口、端口元数据和包含文件，确认运行阶段不带 SDK、源码仓库和构建凭据。
+COPY 报文件不存在，先 `pwd`、`ls`，确认点代表的目录里确实有 index.html，再看 `.dockerignore` 有没有忽略它。容器启动报端口冲突，调整映射左边的主机端口。build 失败看第一条具体错误，run 失败看日志，两者不是同一阶段。
 
-## 参考资料
+~~~bash
+docker logs --tail 20 first-image-web
+docker rm -f first-image-web
+docker image ls foaier-web
+~~~
 
-- [Dockerfile 写法](https://docs.docker.com/build/concepts/dockerfile/)
-- [Docker 多阶段构建](https://docs.docker.com/build/building/multi-stage/)
+本节镜像与源码先保留，下一课继续观察缓存。临时 echo 镜像可用 `docker image rm foaier-echo:v1` 删除。
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/reference/dockerfile/)
+- [进一步了解相关机制](https://docs.docker.com/build/concepts/dockerfile/)

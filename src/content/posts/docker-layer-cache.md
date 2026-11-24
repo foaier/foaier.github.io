@@ -1,83 +1,97 @@
 ---
-title: 为什么改一行代码，Docker 有时要重装全部依赖？
+title: 镜像分层与搬运：commit、save/load、export/import 怎么选
 date: '2026-11-24'
-summary: 理解 Dockerfile 的层与缓存，调整复制顺序减少重复还原。
+summary: 修改一份网页，观察可写层，再分别保存镜像和容器文件系统。
 series: Docker 与 Kubernetes
-order: 8
+order: 6
 tags:
-  - Docker 基础
   - Docker
-  - Kubernetes
-level: Docker 基础
+  - Docker 入门
+level: Docker 入门
 prerequisites:
-  - docker-build-context
+  - docker-debug
 goals:
-  - 解释构建缓存何时失效，并把项目依赖文件放在源码复制之前。
+  - 验证容器改动隔离，正确选择镜像归档与数据备份方式。
 ---
+你在容器里新建了文件，另一个由同一镜像启动的容器能看到吗？不能。镜像层只读，每个容器上面还有自己的可写层。这一课通过修改网页来观察它，再区分 commit、save/load 和 export/import。
 
-Dockerfile 改完跑一次要三分钟，改一个注释又花三分钟，这种等待很快就让人不想做实验。Docker 的构建缓存可以复用未变化的步骤，但后面某一步的输入发生变化，通常从那一步往后的结果都得重做。
+准备：Bash、Docker。新建目录 `~/docker-practice/layers`，以下命令全部在这里执行。镜像标签是实验名字，清理时只删本节对象。
 
-## 把变化少的依赖放在前面
+## 同一份镜像，两个独立的容器
 
-在 .NET 项目里，依赖声明集中在 csproj。若先 COPY 全部源码再 restore，改一个 `.cs` 文件也会让 restore 步骤的输入变化。把项目文件先复制并还原，再复制频繁变化的源码，依赖缓存就更容易保住。缓存是构建优化，不是正确性的保证；需要干净重建时可以主动关闭。
-
-## 比较三次构建的缓存记录
-
-课程 Dockerfile 先复制 csproj 并 `dotnet restore`，后复制源码再 publish。连续构建两次记录耗时；改一行 Program.cs 再 build，观察 restore 是否显示 Cached。最后用 `--no-cache` 做一次对照，确认缓存确实减少了重复工作。
-
-~~~powershell
-docker build --progress=plain -t container-course-api:cache .
-docker build --progress=plain -t container-course-api:cache .
-docker build --no-cache -t container-course-api:clean .
+~~~bash
+mkdir -p ~/docker-practice/layers
+cd ~/docker-practice/layers
+docker run --name layer-a -d nginx:stable-alpine
+docker run --name layer-b -d nginx:stable-alpine
+docker exec layer-a sh -c 'echo layer-a-only > /usr/share/nginx/html/index.html'
+docker exec layer-a cat /usr/share/nginx/html/index.html
+docker exec layer-b head -n 3 /usr/share/nginx/html/index.html
 ~~~
 
-## 在构建日志里验证缓存命中
+a 输出 `layer-a-only`，b 仍是原来的 HTML。修改发生在 a 的可写层，并没有把基础镜像改掉。
 
-连续两次构建时，第二次未变化的步骤应显示 CACHED。再改一处源码重建：依赖文件未变时 restore 应命中，源码之后的 publish 会重跑。若 restore 每次都重跑，检查 Dockerfile 是否在 restore 前执行了 COPY . .。最后一条只删本课的临时镜像。
-
-~~~powershell
-docker build -t container-course-api:cache-check .
-docker image inspect container-course-api:cache-check --format '{{.Id}}'
-docker image rm container-course-api:cache-check
+~~~bash
+docker diff layer-a
+docker image history nginx:stable-alpine
 ~~~
 
-## 缓存命中的依据是输入，不是“上次构建成功”
+diff 的 A、C、D 分别表示新增、修改、删除；你应找到 index.html 的变化。history 能看到镜像构建记录。层共享的是文件内容，不意味着多个容器共用一份可随便修改的运行内存。
 
-BuildKit 会根据某条指令、其依赖文件和前序层的输入判断能否复用结果。COPY 的文件内容变化会让该层及后续层重建；较早的依赖安装层一旦失效，后面的层也通常不能沿用。缓存解决重复计算，不是发布缓存，不应改变正确性。
+## commit：把这次改动做成新镜像
 
-~~~text
-COPY *.csproj -> RUN dotnet restore -> COPY 源码 -> RUN dotnet publish
-     依赖定义稳定时，源码修改通常只让后两步重跑
-     若一开始 COPY . .，源码每次变化都可能让 restore 重跑
+~~~bash
+docker commit -m 'replace demo homepage' -a foaier layer-a lesson-nginx:committed
+docker run --name layer-c -d -p 127.0.0.1:8083:80 lesson-nginx:committed
+curl http://localhost:8083
 ~~~
 
-课程 Dockerfile 先复制 csproj 再 restore，就是为了把变化较少的依赖输入与频繁修改的源码分开。依赖定义更新时重新 restore 是正确行为；不要为了追求全命中而复用过期依赖结果。
+c 的首页也显示 `layer-a-only`，说明新镜像带上了 a 的文件改动。commit 默认会短暂暂停容器来减少文件变化，但它不能保证数据库备份的一致性；挂载卷里的内容也不会被打进这个镜像。
 
-## 用构建日志验证缓存，而不是凭感觉
+commit 适合演示和临时留样。实际项目应把操作写进 Dockerfile，否则别人不知道你进容器执行过哪些命令，也无法可靠重建。后面的 Dockerfile 课会把这次改网页变成可复现文件。
 
-第一次构建后再次执行相同构建，观察步骤旁是否标记 CACHED。再只改 Program.cs 中的业务代码并构建，restore 层仍应命中缓存。最后修改项目依赖文件再构建，restore 层应该重跑。
+## save/load：带走完整镜像
 
-~~~powershell
-docker buildx build --progress=plain --load -t cache-lab:local .
-docker buildx build --progress=plain --load -t cache-lab:local .
+~~~bash
+docker image save -o lesson-nginx.tar lesson-nginx:committed
+docker image load -i lesson-nginx.tar
+docker image ls lesson-nginx
 ~~~
 
-这两个命令要在 container-course 目录执行。不要同时改 Dockerfile、项目文件和源码，否则无法判断哪项输入让缓存失效。实验结束可保留镜像；它不会改数据库卷。
+save 输出镜像归档，包含镜像配置和层；load 读取这类归档。把文件复制到另一台 Docker 电脑，再执行 load 即可，不必搭镜像仓库。这里在同一台电脑验证，所以提示已存在也正常。
 
-## BuildKit 缓存挂载与普通镜像层不同
+使用 `-o`、`-i` 直接读写文件，避免某些终端把二进制流重定向时改坏。镜像里若带凭据，归档里也会有，不要把它当成脱敏文件。
 
-对包管理器缓存，可以使用 BuildKit cache mount，把下载缓存留给构建器复用，但不把缓存目录放进最终镜像层。以 .NET 为例，可将 restore 改为：
+## export/import：拿的是容器文件系统
 
-~~~~dockerfile
-RUN --mount=type=cache,target=/root/.nuget/packages \
-    dotnet restore src/ContainerCourse.Api/ContainerCourse.Api.csproj
-~~~~
+~~~bash
+docker export -o layer-a-rootfs.tar layer-a
+docker import layer-a-rootfs.tar lesson-rootfs:imported
+docker image inspect lesson-rootfs:imported --format 'cmd={{json .Config.Cmd}}'
+docker run --rm lesson-rootfs:imported cat /usr/share/nginx/html/index.html
+~~~
 
-这是理解缓存挂载的示例；当前课程 Dockerfile 尚未采用它，改之前要保证构建阶段以 root 身份运行且路径与 SDK 镜像一致。多架构 builder、CI 临时 runner 和开发机的缓存彼此不一定共享，首次构建仍需要联网获取包。
+最后仍能读到改过的文件，但导入镜像不会自动保留原镜像的启动命令、端口说明和层历史。运行它时要明确提供命令。挂载卷的内容同样不在 export 里，因此它不是数据库迁移工具。
 
-需要完全验证干净构建时用 --no-cache；需要拉取基础镜像的更新版本时加 --pull。前者不清理已有镜像，后者也不等于把 Dockerfile 中的浮动标签固定住。生产构建仍要锁定依赖并记录镜像 digest。
+| 目的 | 选什么 | 保留什么 |
+|---|---|---|
+| 把容器文件改动留成镜像 | commit | 文件改动及部分容器配置，排除挂载数据 |
+| 离线搬镜像 | save → load | 镜像层、配置和标签信息 |
+| 获取容器根文件系统 | export → import | 文件内容，不能当完整镜像备份 |
+| 备份数据库 | 数据库导出或受支持的备份工具 | 一致的数据与恢复过程 |
 
-## 参考资料
+## 看空间，再清理自己的对象
 
-- [构建缓存](https://docs.docker.com/build/cache/)
-- [缓存优化建议](https://docs.docker.com/build/cache/optimize/)
+~~~bash
+docker system df
+docker image ls --filter dangling=true
+docker rm -f layer-a layer-b layer-c
+docker image rm lesson-nginx:committed lesson-rootfs:imported
+~~~
+
+tar 文件保留在本课目录，需要时手工删除。不要把镜像 SIZE 相加当作磁盘使用量，因为多个镜像可能共用层。构建缓存如何复用、代码怎么改才不重复下载依赖，会在[构建上下文与缓存](/articles/docker-build-context/)里继续练。
+
+## 继续阅读
+
+- [命令与配置说明](https://docs.docker.com/reference/cli/docker/container/commit/)
+- [进一步了解相关机制](https://docs.docker.com/reference/cli/docker/image/save/)

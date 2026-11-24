@@ -1,70 +1,104 @@
 ---
-title: 容器能跑不代表适合上线：Pod 安全先从这几处检查
+title: 容器权限怎么收紧：非 root、只读文件系统和 Pod 安全准入
 date: '2026-11-24'
-summary: 检查默认 ServiceAccount、运行身份、能力、镜像标签和 Secret 暴露风险。
+summary: 在独立 namespace 启用 Restricted 策略，先看违规 Pod 被拒绝，再运行满足约束的容器。
 series: Docker 与 Kubernetes
-order: 33
+order: 42
 tags:
-  - Kubernetes 进阶
-  - Docker
   - Kubernetes
 level: Kubernetes 进阶
 prerequisites:
   - k8s-rbac
 goals:
-  - 对课程 API 使用最小权限思路，并指出几个常见的运行时风险。
+  - 在独立 namespace 启用 Restricted 策略，先看违规 Pod 被拒绝，再运行满足约束的容器。
 ---
+把镜像做小不等于权限安全。以 root 运行、挂宿主机目录、打开 privileged，都可能让一个应用漏洞变成节点风险。先从应用实际需要的权限出发，一项项收紧，再验证它还能工作。
 
-开发机上容器能启动，只证明路径通了一遍。生产还要问：进程是不是 root，容器能不能提权，为什么应用要访问 Kubernetes API，镜像能不能追到源码版本？
+## 哪个设置限制哪件事
 
-## 先收紧进程和集群访问权限
+| 设置 | 作用 | 常见后续工作 |
+| --- | --- | --- |
+| runAsNonRoot | 要求非 root 用户 | 镜像目录权限要兼容 UID |
+| allowPrivilegeEscalation: false | 阻止进程通过机制获取更高权限 | 不替代 capabilities 限制 |
+| capabilities.drop: ALL | 去掉默认 Linux 能力 | 确实需要的能力再逐项评估 |
+| readOnlyRootFilesystem | 根文件系统只读 | 临时写入目录另挂卷 |
+| seccompProfile: RuntimeDefault | 使用运行时默认系统调用过滤 | 个别系统调用可能不再允许 |
 
-课程 API 不需要访问 Kubernetes API，可以创建专用 ServiceAccount 并关闭自动 token。保持非 root、默认 seccomp、禁止提权并删掉多余 Linux capabilities，可以缩小失陷后的活动空间。Pod Security Standards 有 privileged、baseline、restricted 档位，强制 restricted 前要先验证数据库镜像的初始化行为和全部工作负载。
+Pod Security Admission 是 namespace 级准入机制，常见等级是 privileged、baseline、restricted。warn 提醒，audit 写审计注解，enforce 拒绝不合格新 Pod；不是给已有进程自动降权。
 
-容器里的凭证、Kubernetes Secret 和镜像拉取密钥用途不同。Secret 的 base64 不是加密。GHCR 私有包需要 imagePullSecret 或节点身份拉取；应用需要的数据库口令再单独注入。
+## 在专用 namespace 开启 Restricted
 
-## 检查课程 API 的运行边界
-
-检查课程 API 的身份与容器安全上下文；这节会先更新示例 Deployment，使用专用 ServiceAccount、关闭 token 挂载，并在容器级禁止提权、丢弃 capability、只读根文件系统，将 /tmp 显式挂到 emptyDir。
-
-~~~powershell
-kubectl apply -f k8s/20-api.yaml
-kubectl -n container-course rollout status deployment/course-api
-kubectl -n container-course get deployment course-api -o yaml
-docker image inspect container-course-api:local --format "{{.RepoTags}} {{.Config.User}}"
+~~~bash
+kubectl create namespace secure-lab --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace secure-lab pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/enforce-version=v1.35 --overwrite
+kubectl -n secure-lab run denied --image=nginx:1.28-alpine --restart=Never
 ~~~
 
-## 检查 Pod 的运行身份、安全上下文和 API 权限
+最后一条预期被 Forbidden 拒绝，错误会列出缺失的安全字段。这里故意不在 lab 上加规则，否则前面的学习清单可能突然无法创建。namespace 的限制版本固定为本课 Kubernetes 版本，避免策略随升级无意变化。
 
-在 YAML 中检查 runAsNonRoot、只读根目录、capabilities 和 token 挂载；两条 can-i 预期都为 no，因为这个 API 不需要访问 Kubernetes API。若程序确实需要读取对象，应创建专用 ServiceAccount 和最小 Role，而不是给默认身份管理员权限。
+## 给它一个真正满足约束的配置
 
-~~~powershell
-kubectl -n container-course get pod -l app=course-api -o yaml
-kubectl auth can-i get secrets -n container-course --as=system:serviceaccount:container-course:course-api
-kubectl auth can-i get pods -n container-course --as=system:serviceaccount:container-course:course-api
+~~~yaml file=security/restricted.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: safe-tool
+  namespace: secure-lab
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: tool
+      image: busybox:1.37
+      command: ["sleep", "3600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: scratch
+          mountPath: /work
+  volumes:
+    - name: scratch
+      emptyDir: {}
 ~~~
 
-## Pod 安全上下文如何落到运行进程
+~~~bash
+kubectl apply -f security/restricted.yaml
+kubectl -n secure-lab wait --for=condition=Ready pod/safe-tool --timeout=120s
+kubectl -n secure-lab exec safe-tool -- id
+kubectl -n secure-lab exec safe-tool -- sh -c 'echo ok > /work/result; cat /work/result'
+kubectl -n secure-lab exec safe-tool -- sh -c 'echo nope > /etc/result'
+~~~
 
-课程 API Deployment 已展示几项常见收紧措施：runAsNonRoot 防止以 root 启动，RuntimeDefault seccomp 使用运行时默认系统调用过滤，allowPrivilegeEscalation=false 阻止进程提升权限，capabilities.drop: [ALL] 移除不需要的 Linux capabilities，readOnlyRootFilesystem 减少容器根文件系统写入。
+id 显示 UID 10001；/work 可写；/etc 写入应失败。只读根目录不是“所有地方都不能写”，显式挂载的可写卷仍可写。fsGroup 帮助适用卷提供组权限，具体支持取决于卷和驱动，不要指望它修复所有镜像文件的所有权。
 
-这些选项会影响应用能否写临时目录、绑定低端口或启动辅助进程。收紧前先盘点实际需要的文件路径和系统调用，再显式挂载 tmp 等可写目录；不能通过 privileged: true 一把打开所有权限来“修复”兼容问题。
+## 程序变成 CrashLoop，怎么判断是不是加固引起
 
-## 把安全检查按层做，而不是只检查镜像
+先查日志里是否 permission denied、只读文件系统、无法绑定端口。找出程序真正要写的目录，挂到 /tmp 或指定数据卷，或在构建镜像时设置正确所有权。不要一失败就同时打开 privileged、root、hostPath，让所有限制全部失效。
 
-| 层 | 关键问题 |
-|---|---|
-| 镜像和供应链 | 来源可信、版本可追溯、依赖有更新、扫描结果已评估 |
-| 进程身份 | 非 root、只给必要 capability、只读根文件系统是否可行 |
-| 集群 API | ServiceAccount 是否需要 token，RBAC 是否最小 |
-| 网络 | Pod 间是否需要 NetworkPolicy，入口是否有 TLS 和身份校验 |
-| 数据 | Secret 加密和轮换，PVC 访问控制，备份隔离与恢复 |
-| 准入 | 是否拒绝特权容器、未批准镜像和危险 hostPath |
+普通 Nginx 镜像默认行为与非 root 镜像不同，直接复制这套 securityContext 到任何镜像不保证能启动。先在测试环境逐项验证，再形成应用自己的部署模板。
 
-NetworkPolicy 是否生效取决于 CNI 插件支持；对象创建成功并不证明数据面正在实施策略。Secret 对象也不因为 Base64 表示就变得安全。生产安全要同时检查 API 权限、etcd 加密、节点访问、审计日志和备份副本。
+## 网络、身份和容器权限是不同边界
 
-## 参考资料
+RBAC 管 API 操作，NetworkPolicy 管支持策略的网络流量，安全上下文管进程权限。Restricted 也不会自动扫描镜像漏洞、阻止所有数据外传或替你管理密码。生产还需最小镜像、固定版本、漏洞修复和审计，但每一项都应对应实际威胁和应用需求。
 
-- [Pod 安全标准](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
-- [Kubernetes Secret](https://kubernetes.io/docs/concepts/configuration/secret/)
-- [安全检查清单](https://kubernetes.io/docs/concepts/security/security-checklist/)
+~~~bash
+kubectl -n secure-lab describe pod safe-tool
+kubectl -n secure-lab logs safe-tool
+kubectl delete namespace secure-lab
+~~~
+
+删除专用 namespace 结束实验。基础 lab 没有被整体改成 Restricted，后续课可以继续运行。
+
+## 继续阅读
+
+- [安全上下文](https://kubernetes.io/zh-cn/docs/tasks/configure-pod-container/security-context/)
+- [Pod 安全标准](https://kubernetes.io/zh-cn/docs/concepts/security/pod-security-standards/)

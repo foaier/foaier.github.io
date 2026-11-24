@@ -1,74 +1,127 @@
 ---
-title: Pod 可以重建，数据库文件怎么办？从 PVC 理解持久化
+title: 数据放哪里：emptyDir、hostPath、PV、PVC 和 StorageClass
 date: '2026-11-24'
-summary: 拆开 PV、PVC、StorageClass，并用重建数据库 Pod 验证数据保留。
+summary: 写入一条记录，删除并重建 Pod，验证 PVC 中的数据是否还在，再解释存储绑定和回收行为。
 series: Docker 与 Kubernetes
-order: 29
+order: 36
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
-  - k8s-rollouts
+  - k8s-config-secrets
+  - k8s-resources
 goals:
-  - 验证课程 PostgreSQL 持久卷独立于 Pod，理解本地盘与可靠备份的差别。
+  - 写入一条记录，删除并重建 Pod，验证 PVC 中的数据是否还在，再解释存储绑定和回收行为。
 ---
+容器重建后能重新下载镜像，用户数据却不能靠下载镜像找回来。存储这一课不先背缩写，先做一个实验：写一个文件，删 Pod，再创建同名 Pod，文件还在不在？
 
-API Pod 重建后还能继续处理请求，数据库 Pod 重建后若连表都没有，那就不是同一种故障了。数据库文件不能靠容器可写层保存。PVC 是应用向集群提出的存储申请，不是备份按钮。
+## 几种存储各活多久
 
-## 存储申请、实际卷和供应方式
+| 方式 | 数据在哪里 | 主要边界 |
+| --- | --- | --- |
+| 容器可写层 | 容器文件系统 | 容器被替换后不应依赖它保留数据 |
+| emptyDir | Pod 使用的临时目录或内存 | 同 Pod 容器重启可保留，Pod 删除则丢失 |
+| hostPath | 特定节点上的目录 | 调到别的节点后不再是同一份数据，且会暴露宿主机文件 |
+| PVC 对应的持久卷 | 由存储实现决定 | 独立于 Pod，但不保证跨节点可用或自动备份 |
 
-PVC 写容量与访问要求，PV 代表集群中的一份卷，StorageClass 决定动态供应卷的方式。课程 PVC 申请 1Gi，访问模式 ReadWriteOnce 通常限制为同一节点读写，不等于全局只能一个 Pod 访问，更不提供数据库写入协调。
+PV 是集群中的卷资源，PVC 是某个 namespace 对存储的申请，StorageClass 描述如何动态提供卷。应用通常引用 PVC，存储插件负责满足申请。kind 的 standard 类用节点容器里的本地目录提供卷，适合练习，不是跨机器复制存储。
 
-课程用单副本 PostgreSQL Deployment，更新策略为 Recreate，防止同一数据目录被新旧实例同时打开。kind 的默认存储用于本地演示，节点容器没了数据也可能没了；跨节点移动、云盘快照、数据库复制与恢复要另行设计。生产数据库通常选托管服务或成熟 Operator。
+## 先检查本机已有的存储能力
 
-## 重建数据库 Pod，检查数据是否还在
-
-先通过 API 写一条记录，随后删除数据库的 Pod，让 Deployment 在同一个 PVC 上重建。按课程 Readme 开 API port-forward；它若因相关 Pod 重建断开，重新运行即可。不要删除 PVC，也不要删 namespace。
-
-~~~powershell
-kubectl -n container-course get pvc
+~~~bash
+kubectl config use-context kind-course
 kubectl get storageclass
-# API port-forward 保持运行，在另一个 PowerShell 写入
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType "application/json" -Body '{"note":"pvc-survives-pod"}'
-$context = kubectl config current-context
-if ($context -ne 'kind-course') { throw "当前 context 是 $context；只在课程 kind-course 删除练习 Pod" }
-kubectl -n container-course delete pod -l app=postgres
-kubectl -n container-course rollout status deployment/postgres --timeout=180s
-kubectl -n container-course wait --for=condition=Ready pod -l app=course-api --timeout=180s
-Invoke-RestMethod http://localhost:8080/visits
+kubectl -n local-path-storage get pods
+kubectl get storageclass standard -o yaml
 ~~~
 
-## 继续追 PVC 绑定到了哪块存储
+本课固定 kind 环境应有 `standard`，provisioner 为 local-path，绑定模式 WaitForFirstConsumer。它会等消费者 Pod 出现、确定节点之后再创建合适的卷，所以只创建 PVC 时 Pending 不一定是坏事。别看到 Pending 就再安装一个 provisioner。
 
-PVC Bound 只表示申请已绑定 PV，并不说明备份可恢复。接着查看集群提供的 StorageClass、实际 PV，再检查数据库 Pod 的挂载；删除 PVC 前先读存储回收策略并确认数据有独立备份。
+## 申请卷，挂到一个工具 Pod
 
-~~~powershell
-kubectl get persistentvolumes -o wide
-kubectl -n container-course describe pod -l app=postgres
+~~~yaml file=storage/claim.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: notes-data
+  namespace: lab
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 1Gi
 ~~~
 
-## PVC、PV 和 StorageClass 的关系
+~~~yaml file=storage/writer.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: disk-writer
+  namespace: lab
+spec:
+  containers:
+    - name: shell
+      image: busybox:1.37
+      command: ["sleep", "86400"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: notes-data
+~~~
 
-PVC 是应用对存储容量与访问方式的申请；PV 表示集群可绑定的一块实际存储；StorageClass 描述动态供给所用的驱动和策略。管理员可预先创建 PV，也可由 CSI provisioner 根据 PVC 自动创建。PVC 绑定成功只说明卷被分配，不代表已做备份或具备跨可用区容灾。
+~~~bash
+kubectl apply -f storage/claim.yaml
+kubectl -n lab get pvc notes-data
+kubectl apply -f storage/writer.yaml
+kubectl -n lab wait --for=condition=Ready pod/disk-writer --timeout=180s
+kubectl -n lab get pvc notes-data
+kubectl -n lab exec disk-writer -- sh -c 'echo first-note > /data/note.txt'
+kubectl -n lab exec disk-writer -- cat /data/note.txt
+~~~
 
-| 概念 | 由谁常维护 | 需要读什么 |
-|---|---|---|
-| PVC | 应用团队 | namespace、容量、accessModes、storageClassName |
-| PV | 管理员或 provisioner | 存储来源、容量、回收策略、绑定状态 |
-| StorageClass | 集群管理员 | CSI provisioner、参数、默认类、绑定时机 |
-| CSI driver | 平台团队或云厂商 | 卷创建、挂载、扩容、快照能力 |
+PVC 应从 Pending 变成 Bound，文件输出 first-note。`mountPath` 是容器内路径，不是电脑上的文件夹。ReadWriteOnce 指单节点读写，不是严格“只允许一个 Pod”；同节点多个 Pod 可能共享，真正单 Pod 访问还涉及 ReadWriteOncePod 和 CSI 支持。
 
-ReadWriteOnce 表示卷可由单个节点以读写方式挂载，不等同于“只有一个 Pod 能用”；同一节点上的 Pod 仍可能共享挂载，具体还受驱动支持限制。ReadWriteMany 也要底层文件系统和 CSI driver 支持。
+## 删除 Pod，再读同一个文件
 
-## 回收策略和备份要分开设计
+~~~bash
+kubectl -n lab delete pod disk-writer
+kubectl apply -f storage/writer.yaml
+kubectl -n lab wait --for=condition=Ready pod/disk-writer --timeout=180s
+kubectl -n lab exec disk-writer -- cat /data/note.txt
+kubectl get pv
+~~~
 
-PV 的 Retain/Delete 回收策略控制 PVC 被删后的卷处理方式；Delete 可能连云盘一起删除，Retain 则需要管理员手工回收。生产数据库还需做一致性备份、异地保存、访问控制和定期恢复演练。卷快照有助于恢复，但不能自动代替业务级备份和跨账户隔离。
+仍然输出 first-note，说明数据不属于原 Pod 的生命周期。因为这里使用本地卷，新 Pod 需要调度到符合卷节点约束的地方；节点故障时不能假装换台机器就能读取本地目录。
 
-课程数据库是单副本示例，kind 的 PVC 不是高可用 PostgreSQL。状态型工作负载升级前先确认数据库备份、版本兼容、存储扩容和恢复路径。
+## PVC Pending 和挂载失败分别查什么
 
-## 参考资料
+~~~bash
+kubectl -n lab describe pvc notes-data
+kubectl -n lab describe pod disk-writer
+kubectl -n local-path-storage logs deployment/local-path-provisioner --tail=50
+~~~
 
-- [持久卷](https://kubernetes.io/docs/concepts/storage/persistent-volumes/)
-- [StorageClass](https://kubernetes.io/docs/concepts/storage/storage-classes/)
+没有 StorageClass、容量或访问模式不匹配、provisioner 报错，都要从 PVC 事件看；FailedMount 则继续检查 Pod 事件、卷权限和驱动。动态卷绑定后，storageClassName 等字段不能随意修改。旧课程若已有 local-path 类的 PVC，不要强行改成 standard；先备份数据，保持旧卷或另建新卷迁移。
+
+## 删除 PVC 不是清理一个空标签
+
+PV 的 reclaimPolicy 若是 Delete，删 PVC 往往会连后端数据一起删；Retain 则保留底层数据等待管理员处理。PVC 保护机制可能让仍被 Pod 使用的卷停在 Terminating，这是避免误删的机制，不应首先强拆 finalizer。
+
+本课数据只有 first-note，确认不需要后再执行：
+
+~~~bash
+kubectl -n lab delete pod disk-writer
+kubectl -n lab delete pvc notes-data
+kubectl get pv
+~~~
+
+数据库备份要能恢复并验证，PVC、云盘快照、etcd 快照解决的是不同问题。后面的综合项目会备份 PostgreSQL，而不是把“用了 PVC”当作备份方案。
+
+## 继续阅读
+
+- [持久卷](https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/)
+- [StorageClass](https://kubernetes.io/zh-cn/docs/concepts/storage/storage-classes/)

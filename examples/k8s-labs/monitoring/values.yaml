@@ -1,0 +1,17 @@
+grafana:
+  adminPassword: local-grafana-only
+  persistence:
+    enabled: false
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    resources:
+      requests: {cpu: 100m, memory: 512Mi}
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

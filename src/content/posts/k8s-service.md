@@ -1,88 +1,109 @@
 ---
-title: Pod 地址总在变，别的服务怎么找它？用 Service 给它一个稳定入口
+title: Service：Pod 换了 IP，为什么网站还能访问
 date: '2026-11-24'
-summary: 沿着 Service、标签选择器、EndpointSlice 和 DNS 走一遍访问链路。
+summary: 亲手创建 ClusterIP 服务，用 DNS 和 EndpointSlice 检查后端，再制造一次标签不匹配故障。
 series: Docker 与 Kubernetes
-order: 24
+order: 31
 tags:
-  - Kubernetes 入门
-  - Docker
   - Kubernetes
 level: Kubernetes 入门
 prerequisites:
-  - k8s-architecture
+  - k8s-deployment
 goals:
-  - 找到 API Service 对应的就绪后端，并在集群内通过 DNS 访问。
+  - 亲手创建 ClusterIP 服务，用 DNS 和 EndpointSlice 检查后端，再制造一次标签不匹配故障。
 ---
+Deployment 能补回 Pod，但新 Pod 的 IP 不一定等于旧 IP。如果前端配置写死 Pod IP，后端重建后前端就找不到它。Service 给这组 Pod 一个稳定的访问入口。
 
-刚记下 Pod IP，滚动更新一做地址就变了。Service 就像一个相对稳定的通讯录入口：客户端找服务名，具体可接流量的 Pod 由集群维护。它不负责让程序变快，也不会给任意标签自动找到正确进程。
+## 先分清三个端口
 
-## 用稳定服务名找到会变化的 Pod
+Service 的 `port` 是客户端访问 Service 的端口；`targetPort` 是后端容器实际监听的端口；NodePort 类型还有 `nodePort`，是节点上对外提供入口的端口。它们可以不同。不要把电脑端口、Service 端口和容器端口都叫“应用端口”，排错时很容易查错地方。
 
-课程 Service `course-api` 的 port 是 80，targetPort 是名为 http 的容器端口，最终落到 API 的 8080。selector `app: course-api` 选择对应 Pod；EndpointSlice 记录这些后端与就绪条件。数据库用 `postgres:5432`，这个名字由同 namespace 内的集群 DNS 解析。
+Service 不会启动应用，也不会把不监听 80 的程序变成能监听 80。它依靠 selector 选择同一命名空间里的 Pod，再由 EndpointSlice 记录后端地址和就绪情况。
 
-ClusterIP 用于集群内部；NodePort 借节点端口暴露；LoadBalancer 通常依赖云或其他实现分配入口。在 kind 里只写 LoadBalancer，不保证电脑立刻得到一个可用公网 IP。先用 port-forward 练习，再学 Gateway。
+## 给两个 Nginx 建一个稳定入口
 
-## 核对服务地址与就绪后端
+先确保上课的 Deployment 存在。实验包文件 `basics/service.yaml`：
 
-先看 Service 与 EndpointSlice，再启动一个用完即删的 curl 调试 Pod。首次需要拉取 curl 镜像。它和 API 在同一个 namespace，因此短名字就够；跨 namespace 需使用 `course-api.container-course.svc.cluster.local` 一类完整名称，集群域也可被管理员修改。
-
-~~~powershell
-kubectl -n container-course get service course-api -o wide
-kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o yaml
-kubectl -n container-course run course-curl --rm -i --restart=Never --image=curlimages/curl:8.12.1 -- http://course-api/health/ready
+~~~yaml file=basics/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: lab
+spec:
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP
 ~~~
 
-## 从标签和 Service 描述定位空后端
+`targetPort: http` 引用容器端口的名字；上课 Deployment 已定义名为 http 的 80 端口。用名字可以在修改容器端口号时少改一处配置。
 
-Service 没有可用后端时，先看 API Pod 的标签是否匹配 selector，再看 Service 事件和端口映射。下面这些命令不会重建服务，适合先收集证据；Endpoints 为空时回到标签和 readiness 修正。
-
-~~~powershell
-kubectl -n container-course get pods -l app=course-api --show-labels
-kubectl -n container-course describe service course-api
-kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~bash
+kubectl apply -f basics/deployment.yaml -f basics/service.yaml
+kubectl -n lab rollout status deployment/web --timeout=120s
+kubectl -n lab get service web
+kubectl -n lab get endpointslices -l kubernetes.io/service-name=web -o wide
+kubectl -n lab run client --image=busybox:1.37 --restart=Never -- sleep 86400
+kubectl -n lab wait --for=condition=Ready pod/client --timeout=120s
+kubectl -n lab exec client -- wget -qO- http://web
 ~~~
 
-## Service 类型决定的是入口范围
+最后应返回 Nginx HTML。client 是临时工具 Pod，位于同一 namespace，所以 `web` 就能解析。跨 namespace 使用 `web.lab`，完整名字是 `web.lab.svc.cluster.local`。ClusterIP 一般只能从集群内部访问，不要在电脑浏览器直接输入它后断言 Service 坏了。
 
-| 类型 | 入口范围 | 依赖与注意点 |
-|---|---|---|
-| ClusterIP | 集群内部虚拟地址，默认类型 | 常用于 API 调用数据库或其他服务 |
-| NodePort | 每个节点上一个端口 | 端口范围受集群配置约束，外部防火墙仍需放行 |
-| LoadBalancer | 由外部实现分配入口 | 常依赖云控制器或 MetalLB，可能产生费用 |
-| ExternalName | DNS CNAME 到外部域名 | 不代理流量，不会生成 Pod EndpointSlice |
-| Headless（clusterIP: None） | DNS 返回后端地址而非 ClusterIP | 常用于 StatefulSet 身份发现，不是普通负载均衡入口 |
+## DNS 和负载均衡各做哪件事
 
-服务类型不是“从不安全到安全”的等级。对外提供 HTTP 常用受维护的 Gateway/入口实现；数据库通常只用 ClusterIP，并由网络策略控制哪些 Pod 可以连接。NodePort 和 LoadBalancer 也不会自动加 TLS、身份认证或 WAF。
-
-## 端口映射必须沿着名字和数字读到底
-
-Service 的 port 是客户端访问 Service 的端口，targetPort 是 Pod 上接收流量的端口；targetPort 可以写数字，也可以引用 Pod 声明的命名端口。课程 API 的 Service 暴露 :80，并把它转到容器的命名端口 http，即 :8080。
-
-~~~yaml
-ports:
-  - name: http
-    port: 80
-    targetPort: http
-selector:
-  app: course-api
+~~~bash
+kubectl -n lab exec client -- nslookup web.lab.svc.cluster.local
+kubectl -n lab get pods -l app=web -o wide
+kubectl -n lab get service web -o wide
 ~~~
 
-这段需和 Pod template 中的 labels 对照；Pod 声明 ports.name 为 http、containerPort 为 8080 时，Service 才能按名字找到目标端口。containerPort 是元数据，不会替进程监听端口，也不会创建 NodePort。
+普通 ClusterIP Service 的名字通常解析到 Service IP。数据包再由节点上的 Service 实现转到后端 Pod。调度器不参与每一次 HTTP 请求，CoreDNS 也不是 HTTP 反向代理。TCP 连接复用可能让连续请求一直落在同一个后端，不要拿“连续两次返回一样”判断负载均衡失效。
 
-## CoreDNS 返回 ClusterIP，不代表后端已经可用
+## 故意把标签写错，练一次定位
 
-Service DNS 的短名在同 namespace 可用；跨 namespace 可以用 service.namespace，完整名称通常是 service.namespace.svc.cluster.local，但集群域可能被管理员改过。DNS 返回地址后还需 EndpointSlice 有就绪后端、CNI 连通和容器正确监听。排障时把解析、服务端口、后端端口和应用协议分开验证。
-
-~~~powershell
-kubectl -n container-course get service course-api -o jsonpath='{.spec.clusterIP}{" : "}{.spec.ports[0].port}{" -> "}{.spec.ports[0].targetPort}{"\n"}'
-kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o yaml
-kubectl -n container-course run service-dns-lab --rm -i --restart=Never --image=busybox:1.37 -- nslookup course-api.container-course.svc.cluster.local
+~~~bash
+kubectl -n lab patch service web --type=merge -p '{"spec":{"selector":{"app":"missing"}}}'
+kubectl -n lab get endpointslices -l kubernetes.io/service-name=web -o yaml
+kubectl -n lab exec client -- wget -T 3 -qO- http://web
 ~~~
 
-EndpointSlice 是由控制器维护的后端分片，不应手工把 Pod IP 固定进去。selectorless Service 可以配合手工 EndpointSlice 指向集群外服务，但要自行负责地址更新、健康检查和安全边界。
+最后一条应失败，可能连接拒绝或超时。Service 和 DNS 仍存在，但可用后端为空。修复不是重启 DNS，而是把选择器改回来：
 
-## 参考资料
+~~~bash
+kubectl apply -f basics/service.yaml
+kubectl -n lab get endpointslices -l kubernetes.io/service-name=web
+kubectl -n lab exec client -- wget -T 3 -qO- http://web
+~~~
 
-- [Service](https://kubernetes.io/docs/concepts/services-networking/service/)
-- [EndpointSlice](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/)
+等待 EndpointSlice 出现两个就绪地址后再访问。排错顺序是：Service 是否存在、selector 是否匹配、后端是否 Ready、targetPort 是否指向应用监听端口。
+
+## 其他 Service 类型什么时候用
+
+| 类型 | 用途 | 本机实验里要注意 |
+| --- | --- | --- |
+| ClusterIP | 集群内部稳定访问 | 最常见的默认值 |
+| NodePort | 通过节点 IP 和固定端口进入 | kind 节点在 Docker 内，宿主机未必能直接访问节点 IP |
+| LoadBalancer | 请求平台创建外部负载均衡入口 | 没有云控制器或本地实现时 EXTERNAL-IP 会 Pending |
+| ExternalName | 把服务名映射到另一个 DNS 名 | 只是 DNS 别名，不代理请求，HTTP Host 和证书仍要匹配 |
+| Headless | `clusterIP: None`，直接发现后端地址 | 常用于 StatefulSet 成员发现，并非第五种 type |
+
+Service 的默认转发以连接为单位，也不按 URL 路径区分网页和 API；域名、路径和 HTTPS 要在入口控制器一课处理。
+
+## 在电脑访问，以及本课清理
+
+~~~bash
+kubectl -n lab delete pod client
+kubectl -n lab port-forward service/web 8080:80
+~~~
+
+另一终端 `curl -I http://127.0.0.1:8080` 应返回 200。port-forward 到 Service 实际会选择一个 Pod，并不测试完整的 Service 数据转发链路，因此前面的集群内 wget 不能省。用完按 Ctrl+C，保留 web Deployment 和 Service。
+
+## 继续阅读
+
+- [Service](https://kubernetes.io/zh-cn/docs/concepts/services-networking/service/)
+- [EndpointSlice](https://kubernetes.io/zh-cn/docs/concepts/services-networking/endpoint-slices/)

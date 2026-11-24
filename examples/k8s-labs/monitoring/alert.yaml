@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lesson-alert
+  namespace: monitoring
+  labels:
+    release: monitor
+spec:
+  groups:
+    - name: lesson
+      rules:
+        - alert: LessonAlwaysFiring
+          expr: vector(1)
+          for: 1m
+          labels: {severity: info}
+          annotations:
+            summary: 本地告警链路实验，请在完成后删除

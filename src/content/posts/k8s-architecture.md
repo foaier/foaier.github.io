@@ -1,62 +1,83 @@
 ---
-title: "刚才的 YAML 是怎么变成程序的？顺着一次部署看 Kubernetes"
-date: "2026-11-24"
-summary: "结合刚才创建的 Deployment，看 API、控制器、调度器和节点各自做了什么。"
-series: "Docker 与 Kubernetes"
-order: 23
-tags: ["Kubernetes 入门", "Docker"]
-level: "Kubernetes 入门"
-prerequisites: ["k8s-deployment"]
-goals: ["按先后顺序说清楚提交 Deployment 后，集群如何创建并运行 Pod。"]
+title: 一条 kubectl apply 经过了谁：看懂控制平面和工作节点
+date: '2026-11-24'
+summary: 对照真实组件拆解创建 Pod 的全过程，理解 API Server、etcd、调度器、控制器、kubelet 和网络插件。
+series: Docker 与 Kubernetes
+order: 29
+tags:
+  - Kubernetes
+level: Kubernetes 入门
+prerequisites:
+  - k8s-deployment
+goals:
+  - 对照真实组件拆解创建 Pod 的全过程，理解 API Server、etcd、调度器、控制器、kubelet 和网络插件。
 ---
+你已经运行过 Pod，也看到了副本自动补齐。现在再看组件名称，就能把每个名字对应到实际动作。先别背架构图，跟着一条创建请求走一次。
 
-你刚才提交一份 Deployment 配置，几秒后却出现了新的 Pod。中间发生了什么？先把路径记成一句话：**Kubernetes 收到你的要求，记录下来，安排机器，再让机器启动程序。** 每一步由不同组件负责，出错时也就能按步骤找原因。
+## 电脑里的三个节点装了什么
 
-## 从刚才的 Deployment 找到相关对象
-
-在课程示例目录中运行下面命令。第一条看你现在操作的集群；后面列出 Deployment、ReplicaSet 和 Pod。名称会因集群生成而不同，但 namespace 都是 `container-course`。
-
-~~~powershell
-kubectl config current-context
-kubectl -n container-course get deployment,replicaset,pods -o wide
-kubectl -n container-course describe deployment course-api
+~~~bash
+kubectl get nodes -o wide
+kubectl -n kube-system get pods -o wide
+kubectl -n kube-system get daemonsets
 ~~~
 
-你会看到一个 Deployment、一个 ReplicaSet 和两个 API Pod。Deployment 保存“要两个副本”的要求；ReplicaSet 负责维持两个副本；Pod 是实际运行容器的对象。删掉一个 Pod 后，ReplicaSet 又创建一个新的，这就是刚才观察到的过程。
+在 kind-course 里，通常能看到 API Server、etcd、controller-manager、scheduler、CoreDNS，以及各节点上的 kube-proxy 和 kindnet。控制平面组件多以静态 Pod 运行；kubelet 和 containerd 是节点里的进程，不能指望 `get pods` 把它们也列出来。
 
-## 配置交上去之后发生了什么
+## 从文件到容器，按这个顺序理解
 
-```text
-你运行 kubectl apply
-  -> API Server 检查权限和配置，把 Deployment 记录到集群
-  -> Deployment 控制器创建/更新 ReplicaSet
-  -> ReplicaSet 控制器创建 Pod
-  -> 调度器为 Pod 选择一台节点
-  -> 节点上的 kubelet 下载镜像并启动容器
-  -> 容器状态回报给集群，Pod 变成 Running/Ready
-```
+1. kubectl 读取 YAML，连接 API Server。请求先经过身份认证、权限检查和适用的准入处理。
+2. API Server 接受对象，并把集群状态存进 etcd。只有提交成功还不代表程序已启动。
+3. Deployment 控制器根据模板建立 ReplicaSet；ReplicaSet 控制器创建需要的 Pod 对象。
+4. scheduler 发现未分配节点的 Pod，筛选资源和条件合适的节点，再通过 API 写入绑定结果。
+5. 被选节点上的 kubelet 看到分配给自己的 Pod，通过容器运行时准备镜像、网络和容器。
+6. kubelet 持续报告状态、执行探针。控制器继续观察并调整，让实际状态接近期望。
 
-API Server 可以先理解成 Kubernetes 集群的办事窗口；控制器是不断核对任务有没有完成的后台程序；调度器负责挑一台合适的机器；节点上的 kubelet 负责照配置启动容器。现在先记住这些工作，不必背组件缩写。
+组件主要通过 API Server 读写共享状态。调度器不是直接往 etcd 写一条记录再 SSH 到服务器启动程序；etcd 也不保存你的数据库业务文件或镜像仓库内容。
 
-## 为什么 apply 成功，网页仍可能打不开
+## 用命令观察调度结果
 
-`kubectl apply` 成功通常只表示配置被集群接受，不等于程序已经准备好。镜像可能正在下载，节点可能没有足够内存，应用也可能启动后连不上数据库。遇到这种情况先查对象状态和事件：
-
-~~~powershell
-kubectl -n container-course get pods -o wide
-kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
-kubectl -n container-course logs deployment/course-api --tail=50
+~~~bash
+kubectl -n lab get pods -l app=web -o wide
+kubectl -n lab get events --sort-by=.metadata.creationTimestamp
+lab_pod=$(kubectl -n lab get pods -l app=web -o jsonpath='{.items[0].metadata.name}')
+kubectl -n lab describe pod "$lab_pod"
 ~~~
 
-Pod 还没分到节点，看 Events 中有没有资源不足；Pod 已运行但不 Ready，看应用日志和健康检查；API Server 本身不可访问，则先检查当前集群和网络。排错时先定位“哪一步没有完成”，比一上来重启集群有效。
+在 Events 里找 `Scheduled`、`Pulling`、`Created`、`Started`。Scheduled 表示选好了节点；Pulling 表示拉镜像；Started 只代表容器已启动，是否能接业务还要看 Ready 和探针。事件会过期，不是永久审计记录。
 
-## 在哪里能看到控制面
+## 各组件出问题，会卡在哪一段
 
-kind 在 Docker 容器里模拟节点，课程用户通常不需要直接进控制面容器。云厂商的托管 Kubernetes 也可能不让用户看 API Server 或数据库进程，但 Kubernetes API 仍可以正常工作。记住组件的职责，比去机器里找同名进程更重要。
+| 组件 | 主要职责 | 常见表现 |
+| --- | --- | --- |
+| API Server | 提供集群 API | kubectl 连接失败或请求失败 |
+| etcd | 存集群对象状态 | 写请求失败、控制平面无法正常协作 |
+| scheduler | 给新 Pod 选节点 | 新 Pod 长期 Pending，未分配节点 |
+| controller-manager | 运行各种协调控制器 | 期望数量变了却迟迟没有对应对象 |
+| kubelet / containerd | 在节点运行容器 | 节点异常、容器创建失败、状态不上报 |
+| CNI 插件 | 建立 Pod 网络 | Pod 网络初始化失败或跨节点不通 |
+| CoreDNS | 解析集群服务名 | IP 能访问，但服务名解析失败 |
+| kube-proxy 或替代实现 | 实现 Service 数据转发 | Pod IP 正常、Service 路径异常 |
 
-练习：删除一个 API Pod，再运行 `kubectl -n container-course get deployment,replicaset,pods`。把输出中的对象名称和上面的流程对起来。你看到的状态可能很快变化；如果错过了，就再运行一次查看当前结果。
+这张表是定位起点，不是“看到 Pending 就重启 scheduler”。CPU 不够、污点不匹配、PVC 没绑定也会 Pending，必须结合事件判断。
 
-## 参考资料
+## 控制平面故障和业务故障不是一回事
 
-- [Kubernetes 集群组件](https://kubernetes.io/docs/concepts/overview/components/)
-- [Deployment 控制器](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+短时间失去 API Server，已经运行的容器不一定立刻停止，但无法正常发布、调度和协调故障恢复。只检查网页能打开，并不能证明控制平面健康。反过来 API 正常，也不保证你的应用没写错配置。
+
+~~~bash
+kubectl get --raw='/readyz?verbose'
+docker exec course-worker crictl ps
+docker exec course-worker systemctl is-active kubelet
+~~~
+
+第一条检查 API Server 就绪检查项；后两条只适用于本课 kind 节点容器，用来观察运行时和 kubelet。`crictl` 面向 CRI，不要把宿主机 `docker ps` 和节点里的容器列表混为一谈。
+
+## 多个控制平面不等于多份互不相关的数据
+
+生产高可用通常需要多个 API Server 和具有法定多数的 etcd 集群。三个 etcd 成员需要两个可用，五个需要三个；加到两个成员并不能容忍一个成员故障。我们的单控制平面用于学习，不承担高可用承诺。后面的备份练习会证明：集群状态备份和业务数据库备份必须分别做。
+
+## 继续阅读
+
+- [Kubernetes 组件](https://kubernetes.io/zh-cn/docs/concepts/overview/components/)
+- [控制器工作方式](https://kubernetes.io/zh-cn/docs/concepts/architecture/controller/)
