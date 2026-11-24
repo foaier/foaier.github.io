@@ -84,6 +84,17 @@ spec:
 
 观察结束后只删除这个 Job，再把文件里的标签值还原为 linux。即使调度条件有问题，查看日志也不会帮忙，因为容器尚未运行，这时 Events 才是第一条线索。
 
+## Pending 时用事件和节点余量找调度原因
+
+前面已把 nodeSelector 临时改成不存在的标签，并用新 Job 创建了一个 Pending Pod。先从 Job 标签自动取出 Pod 名，再看 Events。事件会指出资源不足、taint 不容忍或 nodeSelector 不匹配；节点详情展示 allocatable 和已分配 requests。先按具体原因修复，不要盲目删掉所有调度约束。
+
+~~~powershell
+$pendingPod = kubectl -n container-course get pods -l job-name=os-check -o jsonpath='{.items[0].metadata.name}'
+kubectl -n container-course describe pod $pendingPod
+kubectl describe nodes
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 把关键副本全调度到同一故障域会造成一次节点维护全站不可用。用 topology spread 或反亲和性分散副本，同时确认集群有足够容量容纳约束。污点常用于隔离系统节点或特殊硬件，随意给业务容忍会挤占关键资源；资源利用率和故障域要一起看。

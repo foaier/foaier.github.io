@@ -70,6 +70,16 @@ kubectl -n container-course get events --sort-by=.metadata.creationTimestamp
 
 课程 API 目前只提供普通 ASP.NET 请求日志、健康接口和节点资源观测。接入 OpenTelemetry、Prometheus 或云监控时，要另外启用应用指标导出与 trace instrumentation；平台有采集器，不代表应用自动输出了全部信号。
 
+## 比较节点和 Pod 的资源，再筛告警
+
+Pod 指标回答单个工作负载用了多少，节点指标回答机器还剩多少空间。最后只筛 Warning Events；需要长期趋势时再接入指标与日志系统，因为集群 Events 会过期。
+
+~~~powershell
+kubectl top nodes
+kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount,LAST_EXIT:.status.containerStatuses[0].lastState.terminated.reason'
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
 ## 生产里怎么用、怎么排障
 
 监控要围绕用户体验定义 SLI/SLO 和告警阈值，避免每个内部指标都叫 P1。日志保留周期、索引字段和采样率会影响费用与隐私；高基数字段不要直接作为指标标签。告警要有值班负责人、排查链接和止损步骤，发布后观察错误率、延迟和饱和度。

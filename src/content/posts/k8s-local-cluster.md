@@ -61,6 +61,16 @@ nodes 应是 Ready；数据库一个 Pod，API 两个 Pod，READY 列都完整�
 
 ImagePullBackOff 先查本地镜像是否准确命名并 load 到 course；kind 节点不会自动共享宿主机镜像库。PVC Pending 查 StorageClass。8080 被占用时停 Compose 或改为 `8081:80`。重建集群会丢掉该集群状态，没做完课程先别执行 delete cluster。
 
+## 确认 kind 集群建好并连接到 API Server
+
+集群创建后不要再执行第二遍 create。先确认 kind 管理的集群名称，再查 API Server 和节点；如果输出里没有 course 或当前 context 不对，先切换到 kind-course 再继续后面的章节。
+
+~~~powershell
+kind get clusters
+kubectl cluster-info
+kubectl get nodes -o wide
+~~~
+
 ## 生产里怎么用、怎么排障
 
 本地实验容易把公网集群的资源误删，建议使用专用 namespace、清晰 context 名和脚本里的显式 namespace。kind 节点共享本机 CPU 和内存，Pending 可能是电脑资源不足，不代表生产集群容量配置正确。云上验证还要单独检查云负载均衡、CSI 存储、证书、权限和节点网络。

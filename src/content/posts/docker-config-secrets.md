@@ -50,6 +50,15 @@ docker compose exec api printenv ConnectionStrings__Default
 
 应用读到空配置，检查环境变量名称中的双下划线，以及 Compose 服务是否重新创建。`docker compose restart` 不会重新读取所有修改过的配置；`up -d` 才会按变更重新协调容器。秘密轮换后要确认连接池、旧容器和日志中没有继续使用旧值。
 
+## 确认容器仍在运行，再看应用启动日志
+
+本地练习可以检查服务状态和最近日志，但不要把连接串或密码直接打印到终端截图里。出现数据库认证错误时，用 readiness 和数据库日志确认问题，不要用完整环境变量证明密码存在。
+
+~~~powershell
+docker compose ps api db
+docker compose logs --tail 30 api db
+~~~
+
 ## 生产里怎么用、怎么排障
 
 环境变量更新通常不会自动改写已经运行的进程，容器要按发布流程重新创建；密钥轮换需安排新旧凭证并存窗口。限制谁能 inspect 容器、读 CI 日志和拉镜像，也要防止异常时把连接串原样写入日志。配置缺失应在应用启动时快速失败并指出缺少哪个键，错误信息不能打印密钥值。

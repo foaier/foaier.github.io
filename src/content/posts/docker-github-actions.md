@@ -52,6 +52,15 @@ PR 运行应成功编译并构建镜像，但没有 GHCR push；main push 会新
 
 容器镜像只要包含的字节变了，摘要就会变。提交号标签能帮助对应源码，但重推同一个标签仍可能改变它指向的摘要；高要求环境可记录 digest，并在部署记录里保存构建来源与审查结果。
 
+## 看镜像实际包含哪些构建步骤
+
+本地构建和镜像检查已在主练习完成。image history 可以看到镜像记录的构建层，帮助你判断是否把 SDK、源码或不必要的文件带进最终镜像；CI 通过仍需另做部署后健康检查。
+
+~~~powershell
+docker image history --no-trunc container-course-api:ci
+docker image ls container-course-api:ci
+~~~
+
 ## 生产里怎么用、怎么排障
 
 可靠发布除了 build 还要做测试、依赖审查、镜像扫描和部署前验收。限制第三方 Action 的版本和权限，保护默认分支，避免来自不可信 PR 的代码读取仓库秘密。生产部署应使用有审批的环境与固定 digest，并保留上一个可用制品；Actions 绿色只说明流水线步骤过了，不代表线上真实流量验证成功。

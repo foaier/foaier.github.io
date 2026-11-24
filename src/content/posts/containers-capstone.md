@@ -60,6 +60,16 @@ API 两副本 Ready，Service 有后端，PVC Bound，health/ready 返回 ready�
 
 自检：两个 API Ready；删一个后能恢复；数据库 Pod 重建后能读回记录；镜像有版本；密码未提交；另一位读者能按文档重复验证。本地 PVC 不代替独立备份演练。
 
+## 从另一终端发业务请求做最终验收
+
+上面的 port-forward 命令需要留在一个终端持续运行。另开一个终端发出健康检查、读取现有记录，再写入一条虚构数据并读回；这样验证的是经过 Service 的真实请求，不是只看 Pod 显示 Running。
+
+~~~powershell
+Invoke-RestMethod http://localhost:8080/health/ready
+Invoke-RestMethod http://localhost:8080/visits
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/visits -ContentType 'application/json' -Body '{"note":"capstone-smoke"}'
+~~~
+
 ## 生产里怎么用、怎么排障
 
 上线评审至少要回答：镜像如何追溯、配置和密钥如何轮换、失败如何止损、数据库如何备份恢复、容量不足谁处理、告警谁接、回滚会不会破坏数据。把演练结果写成运行手册并由另一位同事照着执行。kind 的成功只证明本地练习链路通，云负载均衡、真实存储和集群高可用仍需在目标环境单独验证。

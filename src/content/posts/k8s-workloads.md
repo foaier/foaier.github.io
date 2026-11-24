@@ -54,6 +54,17 @@ Job 的 COMPLETIONS 为 1/1，日志出现 course-job-done，Pod 进入 Complete
 
 Job 一直重试时先看 backoffLimit、退出码和 `logs --previous` 适用范围；Job Pod 重建后的旧日志可能已不在。StatefulSet 删 Pod 不等于删数据，也不等于自动数据库故障转移，必须读应用或 Operator 的维护说明。
 
+## 运行一次 Job 并查看任务输出
+
+apply 创建 Job，Job 控制器创建 Pod 并追踪完成状态；get 同时查看任务和执行实例；logs 读取结果。要重跑同名 Job，先删除后重新 apply。任务可能重试，真实业务需用幂等键保护外部副作用。
+
+~~~powershell
+kubectl apply -f k8s/os-check.yaml
+kubectl -n container-course get jobs,pods
+kubectl -n container-course logs job/os-check
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 Job/CronJob 需限制并发、超时、重试次数和资源，防止失败后堆积或重跑副作用。StatefulSet 也不自动提供数据库复制与备份，单副本仍是单点；有状态服务要单独设计成员发现、升级顺序、存储恢复和仲裁。发布前验证终止信号与进程退出时间。

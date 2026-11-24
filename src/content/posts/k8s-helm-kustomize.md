@@ -78,6 +78,17 @@ patches:
 
 values 文件里可能也有连接口令、镜像仓库 token 等敏感字段，不要因为 Helm 是模板工具就默认这些值安全。发布流水线应限制 values 的来源、存储和输出日志，渲染结果分享前先查一遍明文。
 
+## 先渲染最终 YAML，再看实际差异
+
+第一条只打印合并后的清单；第二条对比当前集群并标出待改字段；第三条让 API Server 校验但不保存。发现错误副本数、镜像或明文秘密时先停下来修。Helm 可用 helm template 和 helm diff 做类似的发布前检查。
+
+~~~powershell
+kubectl kustomize k8s
+kubectl diff -k k8s
+kubectl apply --dry-run=server -k k8s
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 模板变化可能一次渲染出误删、权限过宽或大量滚动更新。CI 中对渲染结果做 schema、安全和策略检查，部署前审阅差异，记录 Chart/清单版本。Secret 不应因模板化就进入明文 Git；环境覆盖要尽量少，避免测试与生产逐渐变成无法比较的两套系统。

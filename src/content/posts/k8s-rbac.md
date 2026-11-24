@@ -32,8 +32,8 @@ RBAC 基本组合是 Role 或 ClusterRole 加 RoleBinding 或 ClusterRoleBinding
 kubectl -n container-course create serviceaccount course-reader
 kubectl -n container-course create role pod-reader --verb=get,list,watch --resource=pods
 kubectl -n container-course create rolebinding course-reader-pods --role=pod-reader --serviceaccount=container-course:course-reader
-kubectl auth can-i list pods -n container-course --as=system:serviceaccount:container-course:course-reader
-kubectl auth can-i delete pods -n container-course --as=system:serviceaccount:container-course:course-reader
+kubectl auth can-i watch pods -n container-course --as=system:serviceaccount:container-course:course-reader
+kubectl auth can-i create pods -n container-course --as=system:serviceaccount:container-course:course-reader
 kubectl auth can-i list secrets -n container-course --as=system:serviceaccount:container-course:course-reader
 ~~~
 
@@ -56,6 +56,17 @@ no 表示当前授权评估没有授予对应权限；确认 context、namespace
 本地练习账号只有观察课程 Pod 的动机，Role 不应包含 Secret、exec 或 port-forward 这类额外权限。权限审查还应定期清理离职身份和过期临时授权；角色命名写出用途，比 `reader1` 更容易被维护人员看懂。
 
 ServiceAccount 是 Pod 内程序使用的集群身份；人类操作者则通常通过外部身份系统认证。两种身份的授权路径不同，排查 Forbidden 时先确认错误属于谁，再查对应的 RoleBinding。不要把开发者个人凭证塞进 Pod。
+
+## 用 can-i 验证允许和拒绝的权限
+
+预期第一项 yes、后两项 no。--as 做身份模拟，当前操作者还需 impersonate 权限；若这一步报 Forbidden，先确认当前身份是否可以模拟，不要因此扩大 course-reader 权限。
+
+~~~powershell
+kubectl auth can-i list pods -n container-course --as=system:serviceaccount:container-course:course-reader
+kubectl auth can-i delete pods -n container-course --as=system:serviceaccount:container-course:course-reader
+kubectl auth can-i get secrets -n container-course --as=system:serviceaccount:container-course:course-reader
+~~~
+
 
 ## 生产里怎么用、怎么排障
 

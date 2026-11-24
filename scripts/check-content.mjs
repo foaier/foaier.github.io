@@ -42,10 +42,16 @@ for (const file of files) {
     const tree = remark().use(remarkGfm).parse(content);
     let headings = 0;
     let sourceLinks = 0;
+    let commandExamples = 0;
+    let codeBlocks = 0;
     visit(tree, (node) => {
       if (node.type === "heading") {
         assert.ok(node.depth > 1, "The page already supplies h1; use h2 in Markdown");
         headings++;
+      }
+      if (node.type === "code") {
+        codeBlocks++;
+        if (["powershell", "bash", "sh", "shell"].includes(node.lang)) commandExamples++;
       }
       if (node.type === "link") {
         if (node.url.startsWith("/articles/")) {
@@ -68,10 +74,16 @@ for (const file of files) {
       assert.ok(count >= 450 && headings >= 4 && sourceLinks >= 2, "Series article is missing explanation, lesson sections or references");
     }
     if (data.series === "Docker 与 Kubernetes") {
-      for (const section of ["## 概念讲透：", "## 运行过程拆解：", "## 案例推演", "## 生产里怎么用、怎么排障"]) {
-        assert.ok(content.includes(section), `Docker/Kubernetes article is missing ${section}`);
+      const isFirstLesson = file === "docker-why.md";
+      assert.ok(count >= 900, "Docker/Kubernetes lesson needs a complete lesson, not just a short command list: " + count + " Chinese characters");
+      assert.ok(headings >= 7, "Docker/Kubernetes lesson is missing explanatory and practical sections: " + headings + " headings");
+      assert.ok(commandExamples >= 1 && codeBlocks >= 2, "Docker/Kubernetes lesson needs runnable commands and an example; found " + commandExamples + " command blocks and " + codeBlocks + " total");
+      if (!isFirstLesson) {
+        for (const section of ["## 概念讲透：", "## 运行过程拆解：", "## 案例推演", "## 生产里怎么用、怎么排障", "## 怎么确认做对了", "## 留一个小练习"]) {
+          assert.ok(content.includes(section), `Docker/Kubernetes lesson is missing ${section}`);
+        }
       }
-      assert.ok(count >= 850, `Docker/Kubernetes lesson is too short to teach the topic: ${count} Chinese characters`);
+      assert.ok(content.includes("## 没跑通时先查什么") || content.includes("## 出错时按现象查"), "Docker/Kubernetes lesson is missing troubleshooting steps");
     }
     assert.equal((content.match(/^```/gm)?.length ?? 0) % 2, 0, "Unclosed fenced code block");
     assert.equal((content.match(/^~~~/gm)?.length ?? 0) % 2, 0, "Unclosed tilde code block");

@@ -65,6 +65,18 @@ YAML 缩进用空格；`metadata.name` 是对象名字，`containers[].name` 是
 
 YAML 交给 API Server 后还会经过准入校验、默认值填充与控制器处理，因此 `kubectl get -o yaml` 看到的最终对象可能比自己写的清单更长。读输出时先聚焦 metadata、spec、status，理解哪些是你声明的，哪些是系统补上的。
 
+## 先让 API Server 校验 YAML，再创建 Pod
+
+--dry-run=server 让集群校验字段但不保存；确认成功再正式 apply。列表显示 Pod、IP 和节点。若字段不被当前版本支持，先读服务器错误并核对 apiVersion，不要不理解就删掉 spec 中的字段。
+
+~~~powershell
+kubectl config current-context
+kubectl apply --dry-run=server -f k8s/pod-demo.yaml
+kubectl apply -f k8s/pod-demo.yaml
+kubectl -n container-course get pod pod-demo -o wide
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 YAML 可以通过代码审查，但“可读”不等于安全。生产清单要校验命名空间、镜像来源、资源请求、探针、权限和 Secret 引用；先用 diff/服务器端 dry-run 看变更，再 apply。删除清单要确认对象所有权和级联影响，尤其不要把有状态卷随手一起删掉。

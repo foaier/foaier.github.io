@@ -53,6 +53,17 @@ API 上线后报“无法写日志目录”，本地却正常。新镜像改成�
 
 多阶段构建把 SDK 留在构建阶段、把运行时带进最终镜像，但不代表最终镜像里没有任何风险。仍要定期重建以拿到基础镜像安全更新，并检查容器当前用户和实际启动参数。标签写成小一点的 alpine 也不能代替依赖审查。
 
+## 检查最终镜像的运行用户和体积
+
+覆盖 ENTRYPOINT 临时执行 id，可看到镜像默认用户是否为非 root；inspect 中体积单位是字节。最终阶段应使用 ASP.NET Runtime 镜像，而不是 SDK 编译镜像。若应用报临时目录权限错误，先找出具体写入路径，再只开放该路径，不要直接退回 root。
+
+~~~powershell
+docker build -t container-course-api:prod-check .
+docker run --rm --entrypoint id container-course-api:prod-check
+docker image inspect container-course-api:prod-check --format 'size={{.Size}} user={{.Config.User}}'
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 上线镜像还要考虑基础镜像补丁、镜像来源、漏洞扫描、SBOM、签名和保留回滚版本。以摘要部署，更新基础镜像后重新构建并做回归；只看镜像体积小不小不够。最小化镜像会让现场排查更难，可通过日志、指标和受控的临时诊断容器解决，避免在正式镜像里常驻编译器和调试工具。

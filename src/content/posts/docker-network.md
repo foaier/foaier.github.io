@@ -55,6 +55,16 @@ API 配置 Host=localhost，单独运行没问题，放进 Compose 后连不上�
 
 Compose 默认会为项目创建独立网络。同一网络的容器以服务名互相访问，宿主机上的程序通常不能直接使用那个容器 DNS 名。排查时先写清“请求从哪里发、目标在哪个网络、走哪个端口”，别把容器 IP 记死在配置里。
 
+## 查看 API 容器加入了哪个网络
+
+连接串能证明应用配置里写了什么，inspect 则能确认这个容器实际加入的网络。这里直接看 API 容器的网络和 DNS 配置；同一网络中的服务名才能解析，容器 IP 不要写进长期配置。
+
+~~~powershell
+$apiId = docker compose ps -q api
+docker inspect $apiId --format '{{json .NetworkSettings.Networks}}'
+docker compose exec api cat /etc/resolv.conf
+~~~
+
 ## 生产里怎么用、怎么排障
 
 生产网络要按信任边界分区，数据库不应和无关公开服务共享可随意互通的网络；数据库端口只开放给需要的应用。排查连接失败按 DNS、路由、监听地址、防火墙、安全组、TLS 和账号权限顺序查。调试工具不要长期加入生产网络，诊断结束后清理临时容器并记录访问范围。

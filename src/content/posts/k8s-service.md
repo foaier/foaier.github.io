@@ -54,6 +54,16 @@ Service DNS 能解析，但请求超时。先看 EndpointSlice 是否有后端�
 
 Service 的稳定性建立在 selector 和就绪后端上。将来加一支同标签的调试 Pod，它也可能被 Service 选中并接到真实流量；修改标签前先理解选择器范围，不要拿宽泛的 `app=api` 让不相干程序误入业务池。
 
+## 从标签和 Service 描述定位空后端
+
+Service 没有可用后端时，先看 API Pod 的标签是否匹配 selector，再看 Service 事件和端口映射。下面这些命令不会重建服务，适合先收集证据；Endpoints 为空时回到标签和 readiness 修正。
+
+~~~powershell
+kubectl -n container-course get pods -l app=course-api --show-labels
+kubectl -n container-course describe service course-api
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
 ## 生产里怎么用、怎么排障
 
 外部 Service 类型会产生云资源和费用；内部 ClusterIP 虽不可直接从集群外访问，仍要配合网络策略和身份校验。长连接、会话粘滞和客户端连接池会影响流量切换，滚动发布时需验证旧连接如何结束。发现部分用户错误时要比较各后端版本和就绪状态，而不是只测一次 DNS。

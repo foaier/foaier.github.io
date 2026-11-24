@@ -53,6 +53,17 @@ docker image inspect container-course-api:local --format "{{.RepoTags}} {{.Confi
 
 只读文件系统造成写文件失败时，把明确需要的临时目录挂到 emptyDir，不要一口气撤掉所有防护。Pod 与容器 securityContext 生效范围不同。
 
+## 检查 Pod 的运行身份、安全上下文和 API 权限
+
+在 YAML 中检查 runAsNonRoot、只读根目录、capabilities 和 token 挂载；两条 can-i 预期都为 no，因为这个 API 不需要访问 Kubernetes API。若程序确实需要读取对象，应创建专用 ServiceAccount 和最小 Role，而不是给默认身份管理员权限。
+
+~~~powershell
+kubectl -n container-course get pod -l app=course-api -o yaml
+kubectl auth can-i get secrets -n container-course --as=system:serviceaccount:container-course:course-api
+kubectl auth can-i get pods -n container-course --as=system:serviceaccount:container-course:course-api
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 最小权限要覆盖 CI 发布身份、集群操作者、Pod 和镜像仓库。密钥轮换、镜像漏洞响应、基线策略例外和审计日志都要有责任人。不要把 Secret base64 当加密，不要给所有工作负载 cluster-admin，也不要在生产直接执行网上找到的特权调试 Pod。

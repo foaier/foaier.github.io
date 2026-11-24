@@ -51,6 +51,17 @@ docker ps --format "table {{.Names}}	{{.Status}}	{{.Image}}"
 
 不要在 Docker Desktop 设置里随便启用、重置已有 Kubernetes 环境。后面会单独创建 kind 练习集群。云服务商的托管集群减少控制面维护工作，但业务权限、资源费用、备份和应用排错仍要自己负责。
 
+## 比较单机 Compose 和集群命令各自管什么
+
+第一条查看单机服务状态；第二条列出 kubectl 能连接的集群；第三条查看当前集群节点，只有已有 Kubernetes 集群时才成功。Compose 管一台机器上的服务组合，Kubernetes 管集群对象和调度。没有集群时第三条失败不代表 Docker 坏了，先完成 kind 安装。
+
+~~~powershell
+docker compose ps
+kubectl config get-contexts
+kubectl get nodes
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 上集群后会多出控制面升级、节点容量、权限误配、网络策略和费用等运维面。集群自身故障可能影响很多业务，团队必须有平台负责人、版本支持策略、备份恢复演练和成本看板。把 Kubernetes 当作一套运行平台来运营，不是装好 kubectl 后应用就自然高可用。

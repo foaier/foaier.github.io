@@ -54,6 +54,16 @@ bind mount 中宿主机路径写错会导致空目录或权限异常。Linux 文
 
 匿名卷和命名卷都能把数据放在容器之外，但是否安全取决于挂载位置、权限、清理策略和备份。应用升级前拍个 Docker Desktop 磁盘快照也不是完整数据库备份；备份应能在另一个数据库实例上恢复并验证行数或业务查询。
 
+## 核对数据记录和 Compose 实际声明的卷
+
+重建与数据查询的练习已经在上面完成，这里只读数据库行数、Compose 声明的卷名和本机卷列表。卷名称通常带项目名前缀；确认数据归属后再考虑任何删除操作。
+
+~~~powershell
+docker compose exec -T db psql -U course -d course -c 'SELECT COUNT(*) FROM visits;'
+docker compose config --volumes
+docker volume ls --filter label=com.docker.compose.project
+~~~
+
 ## 生产里怎么用、怎么排障
 
 生产数据库需要一致性备份、异地保留、加密、访问控制和定期恢复演练。文件系统复制正在写入的数据库目录可能得到不一致快照，应按数据库支持的备份方法或经过协调的存储快照执行。删除卷、变更卷名和切换挂载路径都可能让服务看到一个空目录；变更前确认当前数据源并准备回退。

@@ -141,25 +141,40 @@ input:focus-visible, summary:focus-visible, [tabindex="0"]:focus-visible {
 .desktop-toc a:hover, .mobile-toc a:hover { color: var(--accent); }
 .desktop-toc .back-to-top { padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--divider); color: var(--text-sub); }
 .mobile-toc { display: none; }
-.code-block { overflow: hidden; margin: 1.5rem 0; border: 1px solid var(--divider); border-radius: 5px; background: var(--surface); }
-.code-scroll { overflow-x: auto; }
-.code-scroll:focus-visible { outline-offset: -2px; }
-.code-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding-left: 1rem; border-bottom: 1px solid var(--divider); color: var(--text-sub); font-family: Consolas, monospace; font-size: .65rem; letter-spacing: .05em; }
-.code-toolbar button { align-self: stretch; min-width: 4rem; padding: .5rem 1rem; border: 0; border-left: 1px solid var(--divider); background: none; color: var(--text-sub); font-family: inherit; font-size: .72rem; cursor: pointer; }
-.code-toolbar button:hover { color: var(--accent); }
-.article-content .code-block pre { overflow: visible; width: max-content; min-width: 100%; padding: 1rem 1.2rem 1.2rem; margin: 0; border-radius: 0; font-size: .82rem; line-height: 1.85; tab-size: 2; }
+.code-block { --code-background: #2d2d2d; overflow: hidden; min-width: 0; margin: 1.5rem 0; border: 1px solid #ffffff14; border-radius: .375rem; background: var(--code-background); color: #e6e6e6; box-shadow: 0 2px 8px #0000000d; color-scheme: dark; }
+.code-toolbar { display: flex; align-items: center; gap: .75rem; min-height: 2.75rem; padding-left: .75rem; border-bottom: 1px solid #ffffff1f; color: #aaa; font-family: Consolas, "Liberation Mono", Menlo, Monaco, monospace; font-size: .75rem; }
+.code-window-dots { display: flex; flex-shrink: 0; gap: .5rem; }
+.code-window-dots > span { width: .75rem; height: .75rem; border-radius: 50%; background: #ff5e5c; }
+.code-window-dots > span:nth-child(2) { background: #ffbb4e; }
+.code-window-dots > span:nth-child(3) { background: #00c857; }
+.code-language { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-copy-status { margin-left: auto; font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: .75rem; }
+.code-copy { display: grid; flex-shrink: 0; place-items: center; align-self: stretch; min-width: 2.75rem; min-height: 2.75rem; padding: .75rem; border: 0; background: none; color: #bdbdbd; cursor: pointer; }
+.code-copy:hover { background: #ffffff0d; color: #fff; }
+.code-copy:focus-visible { outline: 2px solid #8ab7e5; outline-offset: -4px; border-radius: .25rem; }
+.code-copy[data-status="copied"] { color: #9c9; }
+.code-copy[data-status="error"] { color: #f2777a; }
+.code-scroll { display: flex; overflow-x: auto; overscroll-behavior-x: contain; font-family: Consolas, "Liberation Mono", Menlo, Monaco, monospace; font-size: .875rem; line-height: 1.85; scrollbar-color: #666 var(--code-background); scrollbar-width: thin; }
+.code-scroll:focus-visible { outline: 2px solid #8ab7e5; outline-offset: -2px; }
+.code-line-numbers { position: sticky; left: 0; flex-shrink: 0; min-width: 3ch; padding: .875rem .75rem 1.125rem; border-right: 1px solid #ffffff0a; background: var(--code-background); color: #aaa; text-align: right; user-select: none; }
+.code-line-numbers > span { display: block; }
+.article-content .code-block pre { flex: 1 0 auto; overflow: visible; width: max-content; min-width: 0; padding: .875rem 1rem 1.125rem; margin: 0; border-radius: 0; background: var(--code-background); color: inherit; font-family: inherit; font-size: inherit; line-height: inherit; tab-size: 2; }
 .article-content pre code { white-space: pre; overflow-wrap: normal; }
 .article-content :not(pre) > code { border-radius: 3px; font-size: .9em; }
-.hljs-keyword, .hljs-selector-tag, .hljs-literal { color: #a23c66; }
-.hljs-string, .hljs-attr, .hljs-template-tag { color: #386c46; }
-.hljs-number, .hljs-symbol { color: #99600b; }
-.hljs-title, .hljs-built_in, .hljs-type { color: #315e9a; }
-.hljs-comment, .hljs-quote { color: #707774; font-style: italic; }
-:root[data-theme="dark"] .hljs-keyword, :root[data-theme="dark"] .hljs-literal { color: #d7a8cb; }
-:root[data-theme="dark"] .hljs-string, :root[data-theme="dark"] .hljs-attr { color: #b6ce9b; }
-:root[data-theme="dark"] .hljs-number, :root[data-theme="dark"] .hljs-symbol { color: #e5ba88; }
-:root[data-theme="dark"] .hljs-title, :root[data-theme="dark"] .hljs-built_in, :root[data-theme="dark"] .hljs-type { color: #9fc7e6; }
-:root[data-theme="dark"] .hljs-comment { color: #a5afbc; }
+.code-block .hljs-keyword, .code-block .hljs-selector-tag, .code-block .hljs-literal { color: #c9c; }
+.code-block .hljs-string, .code-block .hljs-template-tag, .code-block .hljs-addition { color: #9c9; }
+.code-block .hljs-number, .code-block .hljs-symbol, .code-block .hljs-built_in { color: #f99157; }
+.code-block .hljs-title, .code-block .hljs-type, .code-block .hljs-section { color: #8ab7e5; }
+.code-block .hljs-attr, .code-block .hljs-variable, .code-block .hljs-deletion { color: #f2777a; }
+.code-block .hljs-meta, .code-block .hljs-selector-class, .code-block .hljs-selector-id { color: #6cc; }
+.code-block .hljs-comment, .code-block .hljs-quote { color: #aaa; }
+.code-block .hljs-emphasis { font-style: italic; }
+.code-block .hljs-strong { font-weight: 700; }
+@media (min-width: 768px) {
+  .code-toolbar { padding-left: 1rem; }
+  .code-line-numbers { padding-inline: 1rem; }
+  .article-content .code-block pre { padding-right: 1.25rem; }
+}
 .table-scroll { overflow-x: auto; margin: 1.6rem 0; border: 1px solid var(--divider); border-radius: 4px; }
 .table-scroll table { width: 100%; border-collapse: collapse; font-size: .86rem; line-height: 1.8; }
 .table-scroll th { background: var(--surface); color: var(--text-strong); font-weight: 600; }
@@ -201,6 +216,12 @@ input:focus-visible, summary:focus-visible, [tabindex="0"]:focus-visible {
   .reading-layout { display: block; }
   .article-content pre { white-space: pre-wrap; }
   .article-content pre code { white-space: pre-wrap; }
+  .code-block { border-color: #ccc; background: #fff; color: #222; box-shadow: none; color-scheme: light; }
+  .code-scroll { overflow: visible; }
+  .code-line-numbers { display: none; }
+  .article-content .code-block pre { flex: 1 1 auto; width: auto; background: #fff; color: #222; white-space: pre-wrap; }
+  .article-content .code-block pre code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .code-block .hljs [class*="hljs-"] { color: inherit; }
 }
 
 .container-course { width: min(90%, 900px); }

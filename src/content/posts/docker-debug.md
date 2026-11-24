@@ -57,6 +57,17 @@ API 容器启动几秒就退出，开发者不断改端口。先用 docker ps -a
 
 下一课需要 8080。观察完成后执行 `docker stop web-debug`，再运行 `docker rm web-debug exits-now` 清理这两只明确命名的实验容器。`exits-now` 本来就已退出，不需要再次停止。
 
+## 容器退出时先拿状态、退出码和末尾日志
+
+先确认实例是否存在，再读退出码和启动错误，最后只取末尾 50 行日志，避免长日志淹没第一条异常。容器不存在时去掉筛选器查真实名字；日志为空时检查程序是否把日志写入文件而非标准输出。先保存这些信息，再决定是否重启。
+
+~~~powershell
+docker ps -a --filter name=exits-now
+docker inspect exits-now --format 'status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}'
+docker logs --tail 50 exits-now
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 生产排错保留现场很重要。重启或删除容器可能让当前日志、退出状态和临时文件消失；先复制日志、inspect 摘要和时间线。容器里没有 shell 时，不要假设 exec 一定能用，可以用同网络的诊断容器或临时调试镜像。日志中可能有令牌和用户数据，收集后按访问控制处理，公开工单前先脱敏。

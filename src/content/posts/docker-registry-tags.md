@@ -26,13 +26,15 @@ goals: ["把本机镜像推到自己的 registry，并选择可追溯的标签�
 
 ## 给镜像命名并推送到自己的仓库
 
-下面用 Docker Hub 账号举例。先把 `YOUR_DOCKERHUB_NAME` 换成自己的用户名，标签用当前版本号。`docker login` 使用交互式凭证输入，不要把密码写进文章、脚本或截图。推送之后从仓库页面或另一台已登录的机器核对标签。
+下面用 Docker Hub 账号举例。先用变量填自己的用户名，标签用当前版本号。`docker login` 使用交互式凭证输入，不要把密码写进文章、脚本或截图。推送之后从仓库页面或另一台已登录的机器核对标签。
 
 ~~~powershell
+$owner = Read-Host 'Docker Hub 用户名'
+$image = "$($owner.ToLowerInvariant())/container-course-api:1.0.0"
 docker build -t container-course-api:1.0.0 .
-docker tag container-course-api:1.0.0 YOUR_DOCKERHUB_NAME/container-course-api:1.0.0
-docker login
-docker push YOUR_DOCKERHUB_NAME/container-course-api:1.0.0
+docker login --username $owner
+docker tag container-course-api:1.0.0 $image
+docker push $image
 ~~~
 
 ## 怎么确认做对了
@@ -50,6 +52,20 @@ docker push YOUR_DOCKERHUB_NAME/container-course-api:1.0.0
 ## 没跑通时先查什么
 
 denied 通常是用户名、仓库权限或命名空间不对；推到错账号时检查完整镜像名称。先用 `docker image inspect` 和仓库页面核对。若仓库是私有的，Kubernetes 节点也需要拉取凭证；`docker login` 的本地状态不会自动复制到集群。
+
+## 给镜像加唯一标签并核对远端摘要
+
+下面的用户名会在运行时询问；先用有 package 写权限的 GitHub token 登录 GHCR，Docker 会安全地交互式询问 token。tag 只增加本地引用名，push 才上传；最后一条读取仓库平台信息和摘要。
+
+~~~powershell
+$owner = Read-Host 'GitHub 用户名'
+$image = "ghcr.io/$($owner.ToLowerInvariant())/container-course-api:practice-1"
+docker login ghcr.io --username $owner
+docker tag container-course-api:local $image
+docker push $image
+docker buildx imagetools inspect $image
+~~~
+
 
 ## 生产里怎么用、怎么排障
 

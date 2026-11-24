@@ -59,6 +59,16 @@ kubectl -n container-course rollout status deployment/course-api
 
 副本恢复只说明控制器补了 Pod。容器本地文件、内存里的登录状态、后台定时任务都可能因重建而丢失或重复执行。扩副本之前，先把状态放到合适的共享存储或数据库，并让后台任务具有可重复执行的保护。
 
+## 把命令行改动恢复成清单里的副本数
+
+前一段把 API 临时扩到三个副本；现在重新 apply 课程清单，让实际副本数回到文件声明的值，再等滚动操作完成。命令行 scale 改的是集群当前对象，清单才记录了这个练习的期望配置。
+
+~~~powershell
+kubectl -n container-course apply -f k8s/20-api.yaml
+kubectl -n container-course rollout status deployment/course-api
+kubectl -n container-course get deployment/course-api -o wide
+~~~
+
 ## 生产里怎么用、怎么排障
 
 扩副本能分摊无状态请求，但内存会话、容器本地文件、单次后台任务可能在多副本下丢失或重复。生产部署还要为副本设置资源、探针、拓扑分布和容量预算。手工 kubectl scale 改出的状态可能与 Git 声明不同，下一次自动发布会覆盖它；明确 Git 与集群谁是配置来源。

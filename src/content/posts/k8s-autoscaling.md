@@ -87,6 +87,15 @@ kubectl -n container-course delete hpa course-api
 kubectl apply -f k8s/20-api.yaml
 ~~~
 
+## 观察 HPA 如何逐步调整副本
+
+HPA 根据指标周期性地调整 Deployment 副本，不会立即响应每个请求。下面持续观察 HPA 和 Pod 数量，看到变化后按 Ctrl+C；若指标显示未知，先修 Metrics API 与 CPU requests。
+
+~~~powershell
+kubectl -n container-course get hpa course-api --watch
+kubectl -n container-course get pods -l app=course-api --watch
+~~~
+
 ## 生产里怎么用、怎么排障
 
 HPA 有采样和稳定窗口，尖峰来得太快时扩容可能赶不上；扩缩容过于激进又会造成抖动。配置行为策略、最小副本和最大副本，按业务延迟与队列积压调优。负载生成实验只在本地或授权环境执行，并监控下游容量；副本变多不等于吞吐必然变大。

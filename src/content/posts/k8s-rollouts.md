@@ -59,6 +59,16 @@ kubectl -n container-course rollout status deployment/course-api
 
 rollout status 一直等时，查新 Pod 的 Events 和 readiness；不要只盯 Deployment。复用同一 local 标签时，旧节点缓存不会自动知道镜像变了；换唯一标签比反复猜 imagePullPolicy 可靠。
 
+## 用 ReplicaSet 记录确认发布和回滚结果
+
+不用再重复 rollout history。先看 API 的 ReplicaSet 是否保留新旧模板，再列出每个 Pod 实际用的镜像和 readiness；这比仅看到命令返回成功更能说明当前流量后端是什么版本。
+
+~~~powershell
+kubectl -n container-course get replicasets -l app=course-api --sort-by=.metadata.creationTimestamp
+kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready'
+kubectl -n container-course describe deployment/course-api
+~~~
+
 ## 生产里怎么用、怎么排障
 
 零停机不是设置 maxUnavailable=0 就自动得到。容量不足时新旧 Pod 可能无法同时放置，探针误报会阻塞发布，优雅终止不足会中断长请求。生产发布要配合变更窗口、告警观察、自动暂停条件和清晰回滚人；流量切换后再验证真实请求与错误率，而不只看 Pod 全绿。

@@ -59,6 +59,16 @@ Events 有保留期限，不可当长期审计。公开 issue 不贴带用户数
 
 定位后别忘了问“为什么这个故障没有更早被发现”。如果每次发布都会漏一个配置 key，修复可以包括 schema 校验或部署前测试；如果节点磁盘总满，删除 Pod 只能掩盖根因。让排错记录最终变成一条可预防的改进。
 
+## 快速筛告警事件和重启中的 Pod
+
+如果集群对象很多，先把事件缩到 Warning，再看 API Pod 的阶段、重启次数和等待原因。Pending 先看调度 Events；ImagePullBackOff 看镜像引用与拉取凭证；CrashLoopBackOff 再查当前或上一轮日志。
+
+~~~powershell
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,PHASE:.status.phase,RESTARTS:.status.containerStatuses[0].restartCount,WAITING:.status.containerStatuses[0].state.waiting.reason'
+kubectl -n container-course describe deployment/course-api
+~~~
+
 ## 生产里怎么用、怎么排障
 
 事件有保留期限，故障时要尽早收集 kubectl describe、相关时间段日志、版本摘要、指标和变更记录。先止损再修根因，涉及数据写入时避免盲目回滚造成重复或丢数据。值班记录写清影响范围、时间线、证据、修复和预防项，去除用户数据、令牌与内部地址后再共享。

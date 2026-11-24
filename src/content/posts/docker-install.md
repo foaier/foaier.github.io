@@ -51,6 +51,15 @@ Windows 检查 WSL 发行版集成是否针对当前发行版开启，安装/更
 
 `docker info` 也能看引擎详情，但它输出信息很多，还可能包含内部地址；求助时别整份贴到公开论坛。安装完成后把客户端版本、Engine 版本和系统发行版记在自己的笔记里，团队协作时有助于判断同一命令为何在不同电脑上表现不一样。
 
+## 再检查引擎状态和 Compose 插件
+
+前面的 docker version 已确认 CLI 和 Engine 都能互相通信。这里分别检查 Engine 运行信息与 Compose 插件；若插件报不存在，处理插件安装即可，不用重装 Docker。
+
+~~~powershell
+docker info --format 'Engine={{.ServerVersion}} OS={{.OperatingSystem}}'
+docker compose version
+~~~
+
 ## 生产里怎么用、怎么排障
 
 线上机器常见问题不是没装 CLI，而是 Docker socket 权限、磁盘分区、代理、仓库证书和 daemon 配置不一致。把用户加入 docker 组通常相当于授予接近 root 的权限，不能当普通只读权限发给所有人。安装升级要固定来源、窗口和回退包；验证服务恢复时同时看 daemon 状态、镜像拉取、容器启动和应用探活，不要只看版本号。

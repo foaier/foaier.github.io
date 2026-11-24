@@ -51,6 +51,19 @@ docker ps
 
 `docker image ls` 看不到容器，正常；它只列镜像。`docker ps` 默认只显示正在运行的容器，停止的用 `docker ps -a`。镜像可删但运行中的容器会依赖它；删除容器也不会顺手删镜像。后面每个清理命令都先看目标名字，再执行。
 
+## 看清镜像和容器各自保存什么
+
+第一条显示镜像摘要、操作系统和 CPU 架构；接着创建一个还没启动的容器，再 inspect 查看它的初始状态。删除这个临时实例后，镜像列表仍在，能直观看到镜像与容器不是同一个对象。
+
+~~~powershell
+docker image inspect nginx:alpine --format 'ID={{.Id}} OS={{.Os}} ARCH={{.Architecture}}'
+docker create --name web-inspect nginx:alpine
+docker inspect web-inspect --format 'status={{.State.Status}} image={{.Config.Image}}'
+docker rm web-inspect
+docker image ls nginx:alpine
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 常见事故是把上传文件写进容器目录，滚动发布后新容器接管流量，旧文件就像“丢了”。生产文件要落到对象存储或受管理的持久卷，镜像保持可替换。确认镜像内容时看摘要而不只看 tag；核对运行了哪个容器用 docker inspect，看数据去了哪儿则检查 Mounts。清理前先确认卷的用途，镜像和业务数据不是一类东西。

@@ -54,6 +54,16 @@ kubectl top pods -n container-course
 
 应用慢先结合 CPU 限流、依赖延迟和线程池，不要只靠 top 瞬时数字。Pod 被 Evicted 不必然是容器超过自己的 limit，也可能是节点压力。真实配置应根据负载测试、观测到的峰值和扩容余量调整。
 
+## 把资源申请和节点余量放在一起看
+
+Pod 资源清单说明调度器预留多少 CPU 和内存；节点详情能看到可分配容量。OOMKilled 事件出现时，再对照 requests、limits 和实际峰值，不要只为消除告警盲目加大限制。
+
+~~~powershell
+kubectl -n container-course get pods -l app=course-api -o custom-columns='POD:.metadata.name,CPU_REQUEST:.spec.containers[0].resources.requests.cpu,MEMORY_REQUEST:.spec.containers[0].resources.requests.memory'
+kubectl describe nodes
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
 ## 生产里怎么用、怎么排障
 
 request 过大容易造成 Pending 和资源浪费，过小会让调度过密；内存 limit 过低会反复 OOM，完全不设上限也可能挤压节点上的其他服务。给关键工作负载留节点余量，并用历史分位数和增长趋势调整。配额与 LimitRange 控制 namespace 总量，不能代替单个服务的容量测试。

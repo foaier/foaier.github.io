@@ -56,6 +56,17 @@ kubectl -n container-course wait --for=condition=Ready pod -l app=course-api --t
 
 探针报 connection refused 看端口和监听地址；报 timeout 看 CPU、数据库超时和网络。readiness 失败的 Events 与应用日志一起看。当前 API 就绪检查会访问真实数据库，生产要控制开销并给连接超时留合理预算。
 
+## 观察 readiness 失败时端点如何变化
+
+仅在本地课程集群执行数据库故障实验。readiness 失败时 API 仍可能 Running，但会从就绪端点暂时移除；它本身不应导致容器重启。describe 中 Events 显示探针失败原因。恢复数据库后等 Pod Ready，再确认地址重新加入。
+
+~~~powershell
+kubectl -n container-course get pods -l app=course-api
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -w
+kubectl -n container-course describe pod -l app=course-api
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 探针 URL、超时、period 和 failureThreshold 要按真实启动时间与故障恢复时间设置。探针端点不能执行昂贵查询，避免每秒产生数据库压力；启动慢的应用用 startupProbe 给足初始化窗口。发布前模拟依赖断连、慢启动和进程死锁，分别观察 Pod 是否被摘流量、是否重启以及事件是否清楚。

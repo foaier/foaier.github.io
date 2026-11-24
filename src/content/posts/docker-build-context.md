@@ -51,6 +51,16 @@ COPY 找不到路径，核对相对的是 context 根目录，不是 Dockerfile 
 
 构建上下文也可能上传到远端 BuildKit。排除 `.git` 不只是提速，仓库历史里可能留着已删除的旧凭证；排除 `bin`、`obj` 则能避免把当前电脑编译产物误当成镜像输入。最好从干净检出目录验证一次构建可重复性。
 
+## 从构建输出判断上下文有没有过大
+
+--no-cache 这次让步骤完整执行，便于观察发送给构建器的 context 大小；输出中的 transferring context 若突然达到几 GB，通常是 bin、obj、.git 或本地文件被一起发送。第二条确认镜像生成。诊断结束后正常构建不必总加 --no-cache。
+
+~~~powershell
+docker build --no-cache -t container-course-api:context-check .
+docker image inspect container-course-api:context-check --format '{{.Id}}'
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 构建上下文可能包含仓库中的证书、SSH key、开发配置和个人文件。生产流水线应使用最小的构建目录，禁止依赖开发机上的隐式文件，并对 secret 文件加双重排除与扫描。多项目仓库还要明确上下文根目录，否则 COPY 相对路径会悄悄变化。上下文减小后，远程构建传输和缓存命中通常也更稳定。

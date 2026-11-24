@@ -96,6 +96,16 @@ kubectl -n container-course get gateway course-gateway -o yaml
 
 TLS 终止后到后端是否继续加密、跨命名空间是否允许引用、证书如何更新，都是额外配置。先把一条 HTTP 路由走通，再逐项增加，故障范围才不会一次扩大到整条链路。
 
+## 确认路由引用的 Gateway 和后端 Service
+
+默认 kind 没有 Gateway 控制器。只有安装了 CRD 和控制器的练习集群才运行这些查询；缺少 GatewayClass 或 HTTPRoute 资源时，先准备实现，不要误以为 apply 一条路由就会自动创建入口。
+
+~~~powershell
+kubectl explain httproute.spec --api-version=gateway.networking.k8s.io/v1
+kubectl -n container-course get gateway,httproute -o wide
+kubectl -n container-course get endpointslice -l kubernetes.io/service-name=course-api -o wide
+~~~
+
 ## 生产里怎么用、怎么排障
 
 生产入口要明确 TLS 在哪里终止、证书如何轮换、哪些团队能改公共路由、限流和超时由谁负责。控制器升级可能改变路由行为，需做兼容验证和灰度。公网入口要配防火墙、WAF 或云安全组；服务内部认证不能因为经过网关就省略。

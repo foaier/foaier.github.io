@@ -83,6 +83,15 @@ kubectl -n container-course delete pdb course-api
 
 两个 API 都健康时通常允许一次驱逐；只有一个健康时可能显示 0。单节点 kind 不做 drain 演练：两个副本放在同一台机器，数量够了也不具有跨节点故障容错能力。真正维护前还要检查副本分布和数据库所在节点。
 
+## 升级前筛出 Pending 工作负载和控制面组件
+
+版本清单和 Ready 节点状态已在前面的命令确认。升级前再检查 Pending Pod 与控制面组件状态；任何异常都先记录和处理。etcd 备份、升级和恢复命令要按集群发行版执行，kind 的容器节点不能照搬生产步骤。
+
+~~~powershell
+kubectl get pods -A --field-selector=status.phase=Pending -o wide
+kubectl -n kube-system get pods -o wide
+~~~
+
 ## 生产里怎么用、怎么排障
 
 升级前检查 API 弃用、PDB、剩余容量、证书、存储插件和回滚边界；升级后核对节点、核心 Pod、工作负载、入口和真实请求。etcd 备份应加密、异地保存并限制读取权限，恢复步骤要有时间目标。控制面故障可能无法靠 kubectl 自救，需要云厂商或集群管理员的带外恢复通道。

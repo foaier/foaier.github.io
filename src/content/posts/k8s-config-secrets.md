@@ -54,6 +54,16 @@ ConfigMap 能列出来；Secret 的 get 列表只显示类型和键数量，不�
 
 CreateContainerConfigError 先查引用的 Secret 名与 key，注意大小写。更新 PostgreSQL 的 POSTGRES_PASSWORD 环境变量不会替已有数据目录自动更改数据库用户密码，需要数据库端轮换并协调应用更新。别因为认证失败就直接删卷。
 
+## 检查 Pod 已引用的配置名称，不读取秘密值
+
+下面列 API Pod、检查 Deployment 声明的 Secret 引用键名，并筛出告警事件。输出只用于核对引用是否拼对，不读取 Secret data；若新 Pod 没替换，继续看 rollout 和事件原因。
+
+~~~powershell
+kubectl -n container-course get pods -l app=course-api -o wide
+kubectl -n container-course get deployment course-api -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{" => "}{.valueFrom.secretKeyRef.name}{"/"}{.valueFrom.secretKeyRef.key}{"\n"}{end}'
+kubectl -n container-course get events --field-selector type=Warning --sort-by=.metadata.creationTimestamp
+~~~
+
 ## 生产里怎么用、怎么排障
 
 Secret 会进入 etcd 备份和管理者可读范围，要开启静态加密、限制读取主体、审计访问并建立轮换流程。通过命令行 --from-literal 创建时，值可能留在 shell 历史或进程参数中，生产自动化应安全注入。配置变更前做格式校验和回滚版本，避免错误配置让所有副本同时失去服务。

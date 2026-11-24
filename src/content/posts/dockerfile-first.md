@@ -76,6 +76,16 @@ USER 使用 .NET 官方 Linux 镜像提供的非 root UID。EXPOSE 只是端口�
 
 文件都齐了再运行本课构建命令。镜像构建时不连数据库，所以 build 成功不会保证 /visits 能用；数据库在后面的 Compose 章节接上。
 
+## 从镜像记录确认构建结果
+
+刚才的构建命令用 `-t` 给镜像起了名字，末尾的点表示以当前目录作为构建上下文。现在用 inspect 看镜像 ID 和体积，再用 `image ls` 确认标签留在本机。运行阶段的日志已经在上面前台启动时看过；按 Ctrl+C 后，`--rm` 会顺便清掉那次容器实例。
+
+~~~powershell
+docker image inspect container-course-api:local --format 'ID={{.Id}} size={{.Size}}'
+docker image ls container-course-api
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 线上构建要避免把开发环境文件、测试密钥和完整 SDK 混进运行镜像。用多阶段构建缩小运行时内容，设置非 root 用户，并验证文件权限、证书和临时目录需求。基础镜像固定到受支持的版本并定期重建获取安全补丁；只追求镜像最小可能导致缺少诊断工具和 CA 证书，得先测试应用真正需要什么。

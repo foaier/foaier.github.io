@@ -53,6 +53,16 @@ Compose 启动后 API 比数据库先发起连接，第一次请求 500，手动
 
 健康检查的命令由 Docker 定期执行，因此频率、超时与资源开销都要合理。健康是探针当前观察到的状态，不是对全部业务正确性的证明。服务持续 unhealthy 时，把健康命令日志和应用本身的请求日志分开读，定位会更快。
 
+## 单独检查健康状态，再请求 API 就绪接口
+
+健康检查历史能解释数据库为什么还处在 starting 或 unhealthy。下方只查询当前状态与应用 readiness；如果数据库已 healthy、API 仍未就绪，就继续看连接配置和 API 日志。
+
+~~~powershell
+$dbId = docker compose ps -q db
+docker inspect $dbId --format 'Database health={{.State.Health.Status}}'
+Invoke-RestMethod http://localhost:8080/health/ready
+~~~
+
 ## 生产里怎么用、怎么排障
 
 检查项太重会给服务增加负载，超时时间太短会在正常高峰产生误报，太长又会延迟发现故障。每个探测都要明确失败后果和阈值，并验证诊断结果能否区分应用故障与依赖故障。数据库需要恢复时，盲目对所有服务同时重启可能造成连接风暴；使用退避、连接池限制和分批恢复。

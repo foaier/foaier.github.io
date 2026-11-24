@@ -57,6 +57,15 @@ PostgreSQL Pod 更新后卡在 Pending，describe 显示旧卷无法挂到新节
 
 PVC Pending 先看 describe pvc、默认 StorageClass 和供应器；Pod Pending 再看挂载事件与节点约束。PostgreSQL 已有数据目录改 POSTGRES_PASSWORD 不会自动轮换密码。卷里有文件也不代表数据库能正确启动，版本兼容和目录权限都要检查。
 
+## 继续追 PVC 绑定到了哪块存储
+
+PVC Bound 只表示申请已绑定 PV，并不说明备份可恢复。接着查看集群提供的 StorageClass、实际 PV，再检查数据库 Pod 的挂载；删除 PVC 前先读存储回收策略并确认数据有独立备份。
+
+~~~powershell
+kubectl get persistentvolumes -o wide
+kubectl -n container-course describe pod -l app=postgres
+~~~
+
 ## 生产里怎么用、怎么排障
 
 存储事故常来自误删 PVC、底层盘满、快照不可恢复、跨区挂载限制和数据库文件损坏。发布前确认删除策略、扩容流程、加密、快照一致性和备份保留。卷扩容是否支持在线操作取决于驱动和文件系统；实际变更前要看提供商文档并在非生产环境验证。

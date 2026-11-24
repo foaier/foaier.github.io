@@ -33,13 +33,12 @@ docker run -d --name lesson-web -p 127.0.0.1:8080:80 nginx:alpine
 docker ps
 docker stop lesson-web
 docker ps -a
-docker rm lesson-web
 docker image ls nginx
 ~~~
 
 ## 怎么确认做对了
 
-stop 之后，`docker ps` 看不到它；`docker ps -a` 仍能看到 Exited。rm 后容器记录消失，镜像仍在 image ls 里。每条命令处理的对象不同，这个差别就是 Docker 日常清理的基本功。
+stop 之后，`docker ps` 看不到它；`docker ps -a` 仍能看到 Exited。这个阶段容器还没删，先留着给下面的 inspect 检查。每条命令处理的对象不同，这个差别就是 Docker 日常清理的基本功。
 
 ## 案例推演
 
@@ -47,13 +46,24 @@ stop 之后，`docker ps` 看不到它；`docker ps -a` 仍能看到 Exited。rm
 
 ## 留一个小练习
 
-把 `--name` 换成另一个名字，停止和删除时也必须使用新名字。再运行两个同名容器，看看 Docker 为什么拒绝第二个。明确名称能让后续脚本更好读，也避免命令误操作到别的练习。
+等下面把本课容器删掉后，再把 `--name` 换成 `lesson-web-2` 重做一遍。试着连续创建两个同名实例，看看 Docker 为什么拒绝第二个。明确名称能让后续脚本更好读，也避免命令误操作到别的练习。
 
 ## 没跑通时先查什么
 
 名字已占用通常是旧容器还在，包括已经退出的容器。用 `docker ps -a` 找到它，确认确实是你的练习，再 rm。不要一上来跑 `docker system prune -a --volumes`：它可能删掉其他项目镜像和本地数据。清理前先看清将删什么。
 
 容器名称也能帮助你隔离不同练习：Compose 会自动按项目名加前缀，直接 docker run 则要自己指定。先用明确名字做小练习，再看 `docker ps --filter name=lesson-web` 定位对象。能准确找对象，清理才不需要一把扫掉整台机器上的东西。
+
+## 检查当前实例，再删容器记录
+
+`docker ps -a` 里这时应该还能看到刚刚停止的 `lesson-web`。inspect 再核对它的状态和来源镜像；确定对象没搞错后，删掉容器记录，再检查 Nginx 镜像仍留在本机。这样也能看清容器和镜像的生命周期并不相同。
+
+~~~powershell
+docker inspect lesson-web --format '{{.State.Status}} {{.Config.Image}}'
+docker rm lesson-web
+docker image ls nginx:alpine
+~~~
+
 
 ## 生产里怎么用、怎么排障
 

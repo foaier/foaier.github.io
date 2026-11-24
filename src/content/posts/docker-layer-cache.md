@@ -50,6 +50,17 @@ docker build --no-cache -t container-course-api:clean .
 
 缓存没命中可能是 Dockerfile 指令顺序、COPY 文件、构建参数或基础镜像变化。缓存命中了也不要假设外部漏洞扫描结果一直有效；依赖升级仍要显式更新。某些包源需要凭证时用 BuildKit secret mount，不要把 token 写进 ARG 或 COPY 进任何层。
 
+## 在构建日志里验证缓存命中
+
+连续两次构建时，第二次未变化的步骤应显示 CACHED。再改一处源码重建：依赖文件未变时 restore 应命中，源码之后的 publish 会重跑。若 restore 每次都重跑，检查 Dockerfile 是否在 restore 前执行了 COPY . .。最后一条只删本课的临时镜像。
+
+~~~powershell
+docker build -t container-course-api:cache-check .
+docker image inspect container-course-api:cache-check --format '{{.Id}}'
+docker image rm container-course-api:cache-check
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 生产流水线缓存要按项目和信任边界隔离，不能让不可信 PR 写入会被发布任务直接使用的缓存。缓存可丢、可重建，不能把它当唯一的依赖包或制品来源。依赖更新策略应有锁定版本与漏洞扫描，定期触发干净构建验证构建不依赖开发机残留；若缓存让结果不可解释，先用 no-cache 复现再定位输入。

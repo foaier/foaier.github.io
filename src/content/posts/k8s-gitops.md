@@ -54,6 +54,17 @@ Git 与集群不一致，先查 controller 的 branch/path、commit、同步错�
 
 持续协调让意外的手工改动被恢复到 Git 记录状态，这是预期行为；紧急修复后也要尽快把合法变更提交回仓库。不把 Git 当唯一记录仍需维护的内容，例如外部数据库迁移、证书授权和密钥轮换，需要各自有审计路径。
 
+## 并排检查 Git 期望状态和集群当前状态
+
+第一条显示 Git 中渲染的声明，第二条显示集群现状，第三条查看部署模板修订。若手工 scale 后同步又改回去，说明 Git 仍声明旧副本数。把需要保留的变更提交回仓库，让一个来源负责期望状态。
+
+~~~powershell
+kubectl kustomize k8s
+kubectl -n container-course get deployment course-api -o yaml
+kubectl -n container-course rollout history deployment/course-api
+~~~
+
+
 ## 生产里怎么用、怎么排障
 
 GitOps 仓库的写权限就是部署权限，应保护分支、审查变更并分环境隔离凭证。控制器失联时集群已有 Pod 可能继续运行，但新变更和漂移修正会停滞；要监控同步状态与错误。Secret 使用密钥管理或加密方案，不能因为 GitOps 就把生产密码明文提交。

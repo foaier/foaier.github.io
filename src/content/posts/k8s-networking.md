@@ -94,6 +94,16 @@ kubectl -n container-course delete networkpolicy postgres-from-api
 
 如果以后再加默认拒绝出站，要同时考虑 DNS 的 UDP/TCP 53、数据库端口及外部依赖。不要把一次入站练习直接扩成全命名空间双向拒绝。
 
+## 从 Pod 网络配置继续查 DNS 与 Service 选择器
+
+DNS 查询成功只能证明名称能解析。接下来核对 Pod 标签、数据库 Service 选择器和容器内 DNS 配置；如果 DNS 正确但 TCP 仍不通，再检查 NetworkPolicy 和 CNI 是否支持策略执行。
+
+~~~powershell
+kubectl -n container-course get pods --show-labels -o wide
+kubectl -n container-course describe service postgres
+kubectl -n container-course exec deployment/course-api -- cat /etc/resolv.conf
+~~~
+
 ## 生产里怎么用、怎么排障
 
 NetworkPolicy 新规则可能默认拒绝 DNS、监控或数据库流量，造成上线后多个依赖同时不可达。先在测试 namespace 按允许列表逐条加策略并观察日志，验证策略插件支持 ingress/egress。抓包和诊断容器要经过授权，生产网络上的请求可能包含敏感数据。
