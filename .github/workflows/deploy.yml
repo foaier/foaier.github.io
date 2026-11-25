@@ -31,6 +31,8 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npm run typecheck
+      - name: Check tank game rules and levels
+        run: npm run game:check
       - name: Validate article content
         run: npm run content:check
       - name: Build static site

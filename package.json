@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "biome lint src",
     "typecheck": "tsc --noEmit",
+    "game:check": "node scripts/check-tank-game.mjs",
     "content:check": "npm run examples:pack && npm run container:pack && node scripts/check-content.mjs",
     "examples:pack": "node scripts/package-examples.mjs",
     "container:pack": "node scripts/package-container-course.mjs"

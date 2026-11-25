@@ -9,7 +9,9 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("theme");
+    let storedTheme: string | null = null;
+    try { storedTheme = window.localStorage.getItem("theme"); }
+    catch { /* Storage can be disabled; keep the page and game usable. */ }
     const preferredTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     const nextTheme = storedTheme === "dark" || storedTheme === "light" ? storedTheme : preferredTheme;
     document.documentElement.dataset.theme = nextTheme;
@@ -19,7 +21,8 @@ export function ThemeToggle() {
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = nextTheme;
-    window.localStorage.setItem("theme", nextTheme);
+    try { window.localStorage.setItem("theme", nextTheme); }
+    catch { /* Apply the theme for this visit even when it cannot be saved. */ }
     setTheme(nextTheme);
   }
 

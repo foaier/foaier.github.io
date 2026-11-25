@@ -16,6 +16,10 @@ Docker 源码位于 `examples/docker-labs/`，Kubernetes 分课实验位于 `exa
 
 ## 本地开发
 
+首页包含像素风坦克大战，50 关分为五大战区，逐步增加敌军数量、兵种和火力。支持方向键 / WASD 移动、空格 / J 开火、P 暂停，以及手机双手触控。通关进度、最高单关分数和音效设置保存在当前浏览器。
+
+游戏逻辑与地图位于 `src/lib/tank-game/`，界面位于 `src/components/tank-battle.tsx`。运行 `npm run game:check` 可检查 50 关地图连通性、敌军寻路、碰撞、补给和通关存档；GitHub Actions 也会执行这些检查。
+
 安装 Node.js 22 或更新版本，然后运行：
 
     npm ci

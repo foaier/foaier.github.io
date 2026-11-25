@@ -1,0 +1,254 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: Component sections have disjoint class scopes; responsive overrides intentionally follow desktop rules. */
+.tank-arcade {
+  --tank-gold: #edc77d;
+  --tank-paper: #e9e8d2;
+  --tank-muted: #a4b19c;
+  width: 100%;
+  container: tank / inline-size;
+  margin: 0 auto 2.8rem;
+  color: var(--text-strong);
+}
+
+.tank-arcade button { cursor: pointer; }
+.tank-arcade button:disabled { cursor: not-allowed; opacity: 0.4; }
+.tank-arcade button:focus-visible, .tank-field:focus-visible, .tank-rules summary:focus-visible { outline: 2px solid #d4a957; outline-offset: 4px; }
+.tank-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.tank-kicker { display: flex; align-items: center; gap: 0.5rem; margin: 0 0 0.35rem; font-size: 0.62rem; letter-spacing: 0.14em; color: var(--text-sub); }
+.tank-kicker > span:first-child { width: 6px; height: 6px; background: #b48742; }
+.tank-heading-divider { opacity: 0.5; margin: 0 0.1rem; }
+.tank-heading h2 { font-size: 1.35rem; line-height: 1.5; margin: 0; letter-spacing: 0.06em; }
+.tank-heading h2 > span { display: inline-block; margin-left: 0.9rem; font-size: 0.72rem; font-weight: 400; color: var(--text-sub); letter-spacing: 0; }
+.tank-heading-tools { display: flex; gap: 0.45rem; }
+.tank-heading-tools button { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--divider); background: transparent; border-radius: 4px; color: var(--text-sub); }
+.tank-heading-tools button:hover { background: var(--surface); color: var(--text-strong); }
+
+.tank-cabinet { border: 1px solid #53604d; padding: 6px; background: #263329; border-radius: 5px; box-shadow: 0 5px 0 #18261e, 0 12px 30px #192c1e15; color: var(--tank-paper); }
+.tank-mission-bar { display: flex; align-items: center; justify-content: space-between; min-height: 36px; padding: 3px 12px 8px; gap: 8px; font-size: 0.69rem; letter-spacing: 0.04em; }
+.tank-mission-bar > span:first-child { display: flex; align-items: center; gap: 8px; }
+.tank-mission-bar i { width: 6px; height: 6px; background: #adc28c; box-shadow: 0 0 8px #adc28c55; }
+.tank-mission-bar b { font-weight: 400; color: #a5af96; font-size: 0.62rem; }
+.tank-live-status { font-size: 0.6rem; color: #c0c9ae; }
+.tank-console { display: grid; grid-template-columns: minmax(0, 1fr) 152px; align-items: stretch; background: #1b281f; border: 1px solid #4e5a47; }
+.tank-field-column { min-width: 0; background: #1e2b22; }
+.tank-field { position: relative; aspect-ratio: 25 / 21; isolation: isolate; outline: none; }
+.tank-field:focus-visible { outline-offset: -3px; z-index: 1; }
+.tank-field canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.tank-field::after { position: absolute; inset: 0; content: ""; pointer-events: none; box-shadow: inset 0 0 20px #0e1d2055; z-index: 1; }
+.tank-stage-tag { position: absolute; top: 6%; left: 6%; color: #f5db9f; padding: 3px 7px; background: #192a24ed; font-size: 0.7rem; pointer-events: none; border-left: 2px solid #edc77d; }
+.tank-stage-tag > span { margin-left: 6px; color: #d1dac1; font-size: 0.6rem; }
+.tank-battle-notice { position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); max-width: 90%; width: max-content; border: 1px solid #829374; padding: 4px 10px; color: #e7edcf; font-size: 0.65rem; background: #1c3028ed; pointer-events: none; }
+.tank-terrain-key { min-height: 31px; padding: 7px 9px; display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; border-top: 1px solid #394a3a; font-size: 0.52rem; color: #b3bea7; }
+.tank-terrain-key > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tank-terrain-key i { width: 9px; height: 9px; display: inline-block; border: 1px solid #ffffff22; }
+.is-brick { background: repeating-linear-gradient(0deg, #b2815c 0 3px, #69523c 3px 4px); }
+.is-steel { background: #9da58f; box-shadow: inset 0 0 0 2px #626f61; }
+.is-water { background: #507f88; }
+.is-forest { background: #678155; }
+.is-ice { background: #9cc0c4; }
+
+.tank-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 16px; text-align: center; background: #0e2117d9; z-index: 2; backdrop-filter: blur(2px); color: var(--tank-paper); }
+.tank-overlay.is-intro { background: radial-gradient(ellipse at center, #12281ce8 10%, #13291dc2 68%, #152b1e55); backdrop-filter: none; }
+.tank-overlay-emblem { display: flex; align-items: center; flex-direction: column; gap: 14px; color: var(--tank-gold); margin-bottom: 14px; }
+.tank-overlay-emblem svg { width: 53px; height: 53px; filter: drop-shadow(4px 4px 0 #0e1914); }
+.tank-overlay-emblem > span { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.33em; padding-left: 0.33em; }
+.tank-overlay h3 { margin: 0; font-size: clamp(1.2rem, 3vw, 1.95rem); font-weight: 800; letter-spacing: 0.06em; text-shadow: 3px 3px 0 #12231b; line-height: 1.5; color: #f3edcf; }
+.tank-overlay p { max-width: 28em; margin: 8px 0 0; color: #bfcab0; font-size: 0.68rem; line-height: 1.9; }
+.tank-intro-tags { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; margin: 18px 0 4px; color: #cfccaa; font-size: 0.59rem; }
+.tank-intro-tags span { display: flex; align-items: center; gap: 5px; }
+.tank-primary { display: flex; justify-content: center; align-items: center; gap: 13px; min-height: 43px; margin-top: 22px; padding: 9px 20px; border: 1px solid #f5d58f; border-radius: 2px; background: #e8c17a; color: #293325; box-shadow: 0 4px 0 #94753c; font-size: 0.77rem; font-weight: 700; transition: background 120ms, transform 120ms, box-shadow 120ms; }
+.tank-primary:hover { background: #f7d99a; transform: translateY(-1px); box-shadow: 0 5px 0 #94753c; }
+.tank-primary:active { transform: translateY(3px); box-shadow: 0 1px 0 #94753c; }
+.tank-overlay > small { display: block; margin-top: 17px; color: #a0b394; font-size: 0.56rem; }
+
+.tank-dashboard { display: flex; flex-direction: column; gap: 14px; padding: 17px 13px 12px; border-left: 1px solid #4e5a47; background: linear-gradient(110deg, #243026, #1e2b22); min-width: 0; }
+.tank-level-number > span, .tank-score > span, .tank-effects > span { display: block; font-size: 0.53rem; letter-spacing: 0.11em; color: #a5b198; }
+.tank-level-number > strong { display: block; font-size: 2.55rem; line-height: 1.15; font-weight: 700; letter-spacing: -0.07em; color: var(--tank-gold); margin-top: 5px; }
+.tank-level-number > strong small { font-size: 0.7rem; color: #8f9b83; margin-left: 8px; font-weight: 400; letter-spacing: 0; }
+.tank-level-number h3 { font-size: 0.76rem; margin: 5px 0 7px; color: #e4e7cd; font-weight: 500; }
+.tank-difficulty { display: flex; align-items: center; gap: 3px; }
+.tank-difficulty i { width: 5px; height: 7px; background: #43503c; }
+.tank-difficulty i.is-on { background: #c6a668; }
+.tank-difficulty > span { margin-left: 3px; font-size: 0.48rem; color: #adba9e; }
+.tank-health-panel { border-block: 1px solid #3b4938; padding-block: 12px; }
+.tank-health-panel > div:not(.tank-meter):not(.tank-base-meter) { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-size: 0.61rem; }
+.tank-health-panel > div > span:first-child { display: flex; align-items: center; gap: 5px; color: #cad3b8; }
+.tank-health-panel strong { font-size: 0.86rem; font-weight: 400; color: #e6d5a2; }
+.tank-health-panel strong small { font-size: 0.55rem; color: #9ca98f; }
+.tank-health-panel strong.is-danger { color: #ffa08c; }
+.tank-meter { display: flex; gap: 3px; align-items: center; margin: 4px 0 14px; }
+.tank-meter i { height: 5px; width: 17px; background: #43513f; }
+.tank-meter i.is-on { background: #c3ce91; }
+.tank-meter span { margin-left: auto; color: #9ca98f; font-size: 0.51rem; }
+.tank-base-meter { height: 5px; margin-top: 6px; background: #43513f; }
+.tank-base-meter > span { height: 5px; background: #a7c69c; transition: width 160ms ease; }
+.tank-enemies > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 0.59rem; color: #bec8ae; }
+.tank-enemies b { color: #e9bf97; font-weight: 400; font-size: 0.9rem; }
+.tank-enemies b small { font-size: 0.51rem; color: #9ca98f; }
+.tank-enemy-icons { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 8px; }
+.tank-enemy-icons svg { width: 13px; height: 15px; color: #cb977c; }
+.tank-enemy-icons svg.is-defeated { opacity: 0.18; }
+.tank-enemy-icons svg.is-commander { color: #edc77d; }
+.tank-score { margin-top: auto; border-top: 1px solid #3b4938; padding-top: 11px; }
+.tank-score strong { display: block; font-size: 1.5rem; line-height: 1.45; letter-spacing: 0.05em; font-weight: 400; color: #ece4b6; }
+.tank-score > div { display: flex; gap: 5px; justify-content: space-between; color: #a0ae94; font-size: 0.49rem; }
+.tank-effects > div { display: flex; gap: 4px; margin-top: 7px; }
+.tank-effects > div > span { display: flex; flex: 1; min-height: 33px; flex-direction: column; gap: 2px; align-items: center; justify-content: center; background: #1b281f; border: 1px solid #3d4b39; color: #9aaa8e; font-size: 0.47rem; }
+.tank-effects > div > span.is-active { border-color: #a3c4bd; color: #b4e6dc; background: #2f4840; }
+
+.tank-command-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 46px; padding: 8px 8px 2px; }
+.tank-command-bar > p { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; font-size: 0.53rem; color: #adbba1; }
+.tank-command-bar kbd { font: inherit; font-size: 0.52rem; border: 1px solid #5d6a51; background: #32402e; color: #e3dcc1; padding: 1px 4px; border-radius: 2px; box-shadow: 0 2px 0 #16231a; }
+.tank-command-bar > div { display: flex; align-items: center; gap: 6px; }
+.tank-command-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 32px; min-height: 30px; padding: 4px 7px; background: #35422f; border: 1px solid #57634a; border-radius: 3px; color: #e0dfc2; font-size: 0.62rem; }
+.tank-command-bar button:hover:not(:disabled) { background: #48563d; }
+.tank-command-bar button > span { color: #aebb9e; font-size: 0.51rem; }
+.tank-touch-controls { display: none; border: 0; margin: 0; min-width: 0; }
+.tank-footnote { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.tank-footnote p { margin: 0; color: var(--text-sub); font-size: 0.66rem; line-height: 1.85; }
+.tank-footnote p > span { color: var(--text-strong); border: 1px solid var(--divider); padding: 2px 5px; font-size: 0.56rem; margin-right: 8px; }
+.tank-footnote > small { text-align: right; font-size: 0.56rem; color: var(--text-sub); }
+.tank-rules { border-top: 1px dashed var(--divider); padding-top: 10px; margin-top: 9px; font-size: 0.7rem; color: var(--text-sub); }
+.tank-rules summary { cursor: pointer; width: fit-content; font-size: 0.63rem; }
+.tank-rules p { margin-block: 12px; }
+.tank-rules > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.tank-rules > div > span { display: flex; flex-direction: column; border-left: 2px solid #af965d; padding-left: 8px; }
+.tank-rules b { font-size: 0.65rem; color: var(--text-strong); }
+
+.tank-map-dialog { width: min(620px, calc(100vw - 24px)); max-height: 85dvh; padding: 24px; color: #e2e4cc; border: 1px solid #7b8768; border-radius: 6px; background: #223227; box-shadow: 0 24px 80px #0007; overflow-y: auto; }
+.tank-map-dialog::backdrop { background: #101c18bb; backdrop-filter: blur(4px); }
+.tank-map-dialog header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+.tank-map-dialog header > div > span { color: #c8b078; font-size: 0.58rem; letter-spacing: 0.16em; }
+.tank-map-dialog h3 { font-size: 1.2rem; margin: 4px 0; }
+.tank-map-dialog header p { color: #a6b79d; font-size: 0.65rem; margin: 6px 0 0; }
+.tank-map-dialog header button { display: grid; place-items: center; width: 34px; height: 34px; flex-shrink: 0; border: 1px solid #536449; color: #dddcc2; border-radius: 3px; background: #344430; }
+.tank-map-zone { margin-bottom: 18px; }
+.tank-map-zone h4 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 0.76rem; margin: 0 0 9px; font-weight: 500; }
+.tank-map-zone h4 > span { font-size: 0.57rem; color: #b49c69; }
+.tank-map-zone h4 > small { color: #a2b197; font-size: 0.55rem; margin-left: auto; }
+.tank-level-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+.tank-level-grid button { min-height: 44px; display: flex; position: relative; align-items: center; justify-content: center; border: 1px solid #53634a; background: #2c3b2c; color: #ccd1b7; font-size: 0.87rem; border-radius: 2px; }
+.tank-level-grid button > svg { position: absolute; right: 3px; bottom: 3px; }
+.tank-level-grid button.is-cleared { background: #3d583b; border-color: #6e8f5e; color: #d0e0b1; }
+.tank-level-grid button.is-selected { border-color: #f0cb7d; background: #ecd096; color: #293825; }
+.tank-level-grid button:hover:not(:disabled) { border-color: #ffe0a5; }
+.tank-map-dialog footer { display: flex; align-items: center; gap: 7px; padding-top: 12px; border-top: 1px solid #45583e; color: #b2bfa2; font-size: 0.62rem; }
+
+.tank-arcade.is-expanded { position: fixed; z-index: 100; inset: 0; margin: 0; padding: 22px max(20px, calc((100vw - 1000px) / 2)); overflow-y: auto; background: var(--bg-body); }
+.tank-arcade.is-expanded .tank-console { grid-template-columns: minmax(0, 1fr) 180px; }
+.tank-arcade.is-expanded .tank-heading { margin-bottom: 12px; }
+.tank-arcade.is-expanded .tank-cabinet { max-width: calc((100dvh - 170px) * 25 / 21 + 200px); margin-inline: auto; }
+.tank-arcade.is-expanded .tank-dashboard { gap: 18px; }
+.tank-arcade.is-expanded .tank-footnote { max-width: 1000px; margin-inline: auto; }
+.tank-arcade.is-expanded .tank-rules { display: none; }
+
+@media (pointer: coarse), (max-width: 600px) {
+  .tank-command-bar > p { display: none; }
+  .tank-command-bar { justify-content: flex-end; min-height: 44px; padding-top: 6px; }
+  .tank-command-bar button { min-height: 36px; min-width: 36px; }
+  .tank-touch-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 16px 10px; }
+  .tank-dpad { display: grid; grid-template-columns: repeat(3, 43px); grid-template-rows: repeat(2, 43px); gap: 3px; position: relative; }
+  .tank-dpad > span { grid-column: 2; grid-row: 2; width: 7px; height: 7px; background: #8a9974; position: absolute; inset: 18px; pointer-events: none; display: none; }
+  .tank-direction { display: grid; place-items: center; border: 1px solid #69745b; border-radius: 4px; box-shadow: 0 3px 0 #16241c; background: #3f4d36; color: #dfdfbd; padding: 0; touch-action: none; user-select: none; }
+  .tank-direction.is-up { grid-column: 2; grid-row: 1; }
+  .tank-direction.is-left { grid-column: 1; grid-row: 2; }
+  .tank-direction.is-down { grid-column: 2; grid-row: 2; }
+  .tank-direction.is-right { grid-column: 3; grid-row: 2; }
+  .tank-touch-controls > p { font-size: 0.58rem; color: #a7b59a; text-align: center; line-height: 1.9; }
+  .tank-fire-button { min-width: 70px; height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 2px solid #dfbb75; color: #253024; background: #d6ae67; border-radius: 50%; box-shadow: 0 4px 0 #866b39, inset 0 0 0 4px #e6c483; touch-action: none; user-select: none; }
+  .tank-fire-button > span { font-size: 0.6rem; font-weight: 700; }
+  .tank-direction:active, .tank-fire-button:active { transform: translateY(2px); filter: brightness(1.18); }
+}
+
+@container tank (max-width: 620px) {
+  .tank-heading h2 { font-size: 1.2rem; }
+  .tank-heading h2 > span { display: none; }
+  .tank-heading-tools button { width: 36px; height: 36px; }
+  .tank-kicker { font-size: 0.52rem; }
+  .tank-cabinet { padding: 4px; }
+  .tank-mission-bar { padding-inline: 7px; font-size: 0.62rem; min-height: 32px; }
+  .tank-live-status { font-size: 0.5rem; }
+  .tank-console { grid-template-columns: minmax(0, 1fr); }
+  .tank-dashboard { display: grid; grid-template-columns: 1.2fr 1fr 1fr; padding: 9px; gap: 8px; border-left: 0; border-top: 1px solid #4e5a47; }
+  .tank-level-number, .tank-effects { display: none; }
+  .tank-health-panel { padding: 0; border: 0; }
+  .tank-health-panel > div:not(.tank-meter):not(.tank-base-meter) { font-size: 0.53rem; }
+  .tank-health-panel > div > span, .tank-health-panel strong, .tank-enemies > div:first-child { white-space: nowrap; }
+  .tank-health-panel strong { font-size: 0.73rem; }
+  .tank-meter { margin-bottom: 5px; }
+  .tank-meter i { width: 11px; height: 4px; }
+  .tank-meter span { font-size: 0.45rem; }
+  .tank-enemies { border-inline: 1px solid #40503a; padding-inline: 7px; }
+  .tank-enemies > div:first-child { font-size: 0.5rem; }
+  .tank-enemies b { font-size: 0.78rem; }
+  .tank-enemy-icons { grid-template-columns: repeat(6, 1fr); gap: 3px; }
+  .tank-enemy-icons svg { width: 9px; height: 10px; }
+  .tank-score { padding: 0; border: 0; margin-top: 0; }
+  .tank-score strong { font-size: 1.3rem; margin-top: 1px; }
+  .tank-score > div { flex-direction: column; gap: 0; font-size: 0.49rem; }
+  .tank-terrain-key { font-size: 0.48rem; gap: 8px; padding-inline: 4px; }
+  .tank-overlay { padding: 12px; }
+  .tank-overlay-emblem { gap: 8px; margin-bottom: 8px; }
+  .tank-overlay-emblem svg { width: 39px; height: 39px; }
+  .tank-overlay-emblem > span { font-size: 0.59rem; }
+  .tank-overlay h3 { font-size: 1.45rem; }
+  .tank-overlay p { font-size: 0.58rem; margin-top: 5px; }
+  .tank-intro-tags { margin-top: 10px; font-size: 0.5rem; gap: 10px; }
+  .tank-primary { margin-top: 12px; font-size: 0.68rem; min-height: 40px; padding: 7px 15px; }
+  .tank-overlay > small { font-size: 0.5rem; margin-top: 12px; }
+  .tank-footnote { margin-top: 14px; }
+  .tank-footnote p { font-size: 0.61rem; }
+  .tank-footnote > small { text-align: left; }
+  .tank-map-dialog { padding: 18px 12px; }
+  .tank-map-dialog h3 { font-size: 1rem; }
+  .tank-level-grid { gap: 5px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .tank-map-zone h4 > small { width: 100%; margin: 0; }
+  .tank-map-zone h4 { gap: 4px 8px; }
+  .tank-arcade.is-expanded .tank-console { grid-template-columns: minmax(0, 1fr); }
+  .tank-arcade.is-expanded .tank-dashboard { gap: 10px; }
+  .tank-arcade.is-expanded .tank-cabinet { max-width: 460px; }
+}
+
+@media (max-width: 600px) {
+  .tank-arcade.is-expanded { padding: 12px 8px; }
+}
+
+@container tank (max-width: 340px) {
+  .tank-overlay-emblem svg { width: 29px; height: 29px; }
+  .tank-overlay h3 { font-size: 1.2rem; }
+  .tank-overlay p { max-width: 23em; }
+  .tank-overlay-emblem { gap: 5px; margin-bottom: 5px; }
+  .tank-overlay > small { margin-top: 8px; }
+  .tank-intro-tags { gap: 7px; font-size: 0.46rem; }
+  .tank-health-panel > div > span > svg { display: none; }
+  .tank-enemies > div:first-child { flex-wrap: wrap; }
+  .tank-touch-controls { padding-inline: 6px; gap: 6px; }
+  .tank-touch-controls > p { font-size: 0.49rem; }
+  .tank-fire-button { min-width: 62px; height: 62px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tank-arcade .tank-primary, .tank-arcade .tank-base-meter > span { transition: none; }
+}
+
+@media (min-width: 601px) and (max-height: 600px) {
+  .tank-arcade.is-expanded { padding-block: 10px; }
+  .tank-arcade.is-expanded .tank-kicker, .tank-arcade.is-expanded .tank-heading h2 > span,
+  .tank-arcade.is-expanded .tank-level-number, .tank-arcade.is-expanded .tank-effects,
+  .tank-arcade.is-expanded .tank-overlay-emblem, .tank-arcade.is-expanded .tank-intro-tags,
+  .tank-arcade.is-expanded .tank-footnote { display: none; }
+  .tank-arcade.is-expanded .tank-heading { margin-bottom: 8px; }
+  .tank-arcade.is-expanded .tank-heading h2 { font-size: 1rem; }
+  .tank-arcade.is-expanded .tank-heading-tools button { width: 30px; height: 30px; }
+  .tank-arcade.is-expanded .tank-cabinet { max-width: calc((100dvh - 180px) * 25 / 21 + 196px); }
+  .tank-arcade.is-expanded .tank-mission-bar { min-height: 28px; padding-bottom: 4px; }
+  .tank-arcade.is-expanded .tank-dashboard { gap: 8px; padding: 9px; }
+  .tank-arcade.is-expanded .tank-health-panel { padding: 0; border: 0; }
+  .tank-arcade.is-expanded .tank-meter { margin-bottom: 6px; }
+  .tank-arcade.is-expanded .tank-score { padding-top: 6px; }
+  .tank-arcade.is-expanded .tank-score strong { font-size: 1.1rem; }
+  .tank-arcade.is-expanded .tank-overlay { padding: 8px; }
+  .tank-arcade.is-expanded .tank-overlay h3 { font-size: 1.1rem; }
+  .tank-arcade.is-expanded .tank-overlay p { font-size: 0.6rem; }
+  .tank-arcade.is-expanded .tank-primary { margin-top: 12px; }
+  .tank-arcade.is-expanded .tank-overlay > small { margin-top: 10px; }
+}
