@@ -1,0 +1,26 @@
+[
+  {
+    "id": "first-site",
+    "title": "先把一个网页服务起来",
+    "summary": "认识请求经过的地方，读懂配置层级，再解决虚拟主机、文件路径和前端刷新 404。",
+    "posts": ["nginx-start", "nginx-config", "nginx-static-location"]
+  },
+  {
+    "id": "proxy-and-assets",
+    "title": "接通后端，让请求各走各的路",
+    "summary": "亲眼看到路径怎样转发、两个后端怎样分流，以及浏览器缓存和压缩是否生效。",
+    "posts": ["nginx-reverse-proxy", "nginx-load-balancing", "nginx-static-performance"]
+  },
+  {
+    "id": "secure-and-cache",
+    "title": "加上 HTTPS、缓存和入口限制",
+    "summary": "验证证书和缓存命中，分清哪些数据不能缓存，再用少量并发请求观察限流。",
+    "posts": ["nginx-https", "nginx-proxy-cache", "nginx-limits-security"]
+  },
+  {
+    "id": "operate-and-deliver",
+    "title": "练习故障，完成一次交付",
+    "summary": "复现常见错误，学习双入口与 VIP，最后把前端、双后端和 HTTPS 组合起来验收。",
+    "posts": ["nginx-troubleshooting", "nginx-high-availability", "nginx-project"]
+  }
+]

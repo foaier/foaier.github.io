@@ -11,6 +11,7 @@ const slugs = new Set(files.map((file) => file.slice(0, -3)));
 const positions = new Map();
 const curriculum = JSON.parse(readFileSync(new URL("../src/content/curriculum.json", import.meta.url), "utf8"));
 const containerCurriculum = JSON.parse(readFileSync(new URL("../src/content/container-curriculum.json", import.meta.url), "utf8"));
+const nginxCurriculum = JSON.parse(readFileSync(new URL("../src/content/nginx-curriculum.json", import.meta.url), "utf8"));
 const expectedSeries = curriculum.map((stage) => stage.name);
 const metadata = new Map();
 const errors = [];
@@ -125,6 +126,16 @@ try {
     else assert.ok(post.prerequisites.length > 0, `Missing prerequisite: ${slug}`);
   }
   assert.equal([...positions.keys()].filter((key) => key.startsWith("Docker 与 Kubernetes/")).length, containerPosts.length, "Unexpected number of Docker and Kubernetes course articles");
+  const nginxPosts = nginxCurriculum.flatMap((stage) => stage.posts);
+  assert.equal(nginxPosts.length, 12, "Nginx route must contain 12 lessons");
+  assert.equal(new Set(nginxPosts).size, nginxPosts.length, "Duplicate Nginx lesson");
+  assert.equal([...positions.keys()].filter((key) => key.startsWith("Nginx 从入门到实战/")).length, nginxPosts.length, "Nginx route must cover every series article");
+  for (const [index, slug] of nginxPosts.entries()) {
+    const post = metadata.get(slug);
+    assert.equal(post?.series, "Nginx 从入门到实战", `Invalid Nginx lesson: ${slug}`);
+    assert.equal(post.order, index + 1, `Wrong Nginx lesson order: ${slug}`);
+    for (const prerequisite of post.prerequisites) assert.ok(nginxPosts.indexOf(prerequisite) >= 0 && nginxPosts.indexOf(prerequisite) < index, `Nginx prerequisite must come earlier: ${slug}`);
+  }
 } catch (error) {
   errors.push(error.message);
 }

@@ -6,6 +6,7 @@ import type { Root } from "hast";
 import { toString as textContent } from "hast-util-to-string";
 import matter from "gray-matter";
 import dockerfile from "highlight.js/lib/languages/dockerfile";
+import nginx from "highlight.js/lib/languages/nginx";
 import powershell from "highlight.js/lib/languages/powershell";
 import rehypeHighlight from "rehype-highlight";
 import rehypeReact from "rehype-react";
@@ -97,7 +98,7 @@ export const getPostBySlug = cache(async (slug: string): Promise<Post | undefine
     });
   };
   const rendered = await remark().use(remarkGfm).use(remarkRehype).use(rehypeSanitize)
-    .use(collectHeadings).use(rehypeHighlight, { detect: false, ignoreMissing: true, languages: { dockerfile, powershell } })
+    .use(collectHeadings).use(rehypeHighlight, { detect: false, ignoreMissing: true, languages: { dockerfile, nginx, powershell } })
     .use(rehypeReact, { Fragment, jsx, jsxs, components: { pre: CodeBlock, table: MarkdownTable } })
     .process(entry.source);
   return { ...entry.metadata, content: rendered.result as ReactNode, headings };

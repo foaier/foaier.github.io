@@ -15,6 +15,7 @@ export default async function ArticlesPage() {
     <main className="container page-main archive-main">
       <header className="archive-header"><p className="section-kicker">NOTES & TUTORIALS</p><h1>把技术讲明白。</h1><p>从一个问题出发，把概念、代码和容易踩的坑串起来。</p></header>
       <p className="archive-learning-link">刚开始接触 AI？<Link href="/learn/">先看 AI 学习路线 →</Link>　想学容器？<Link href="/containers/">从 Docker 到 Kubernetes →</Link></p>
+      <p className="archive-learning-link">准备部署网站？<Link href="/nginx/">跟着 Nginx 教程练代理、HTTPS 和排错 →</Link></p>
       <ArticleIndex posts={posts} />
     </main>
   );

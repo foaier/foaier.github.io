@@ -14,6 +14,12 @@
 
 Docker 源码位于 `examples/docker-labs/`，Kubernetes 分课实验位于 `examples/k8s-labs/`，综合项目位于 `examples/container-course/`。`npm run container:pack` 生成三个同名 ZIP，放在 `public/downloads/`；构建时自动执行。压缩包不包含编译产物、课程外密钥或本地数据。
 
+## Nginx 学习路线
+
+访问 `/nginx/` 阅读 12 篇教程，从配置层级、静态网站与代理开始，逐步学习负载均衡、HTTPS、缓存、限流、日志排错和 Keepalived，最后完成前端 + 双后端的入口实验。
+
+完整配置位于 `examples/nginx-labs/`，构建时打包为 `public/downloads/nginx-labs.zip`。`npm run nginx:check` 在隔离的 Docker Compose 项目中验证 11 份配置的实际 HTTP 行为，需要 Docker、Node.js 22 和 OpenSSL。Keepalived 的真实主备切换需另备两台 Linux 实验机，不在自动检查范围内。
+
 ## 本地开发
 
 首页包含像素风坦克大战，50 关分为五大战区，逐步增加敌军数量、兵种和火力。支持方向键 / WASD 移动、空格 / J 开火、P 暂停，以及手机双手触控。通关进度、最高单关分数和音效设置保存在当前浏览器。
@@ -48,7 +54,7 @@ Docker 源码位于 `examples/docker-labs/`，Kubernetes 分课实验位于 `exa
 
 发布前运行 `npm run content:check`、`npm run lint`、`npm run typecheck` 和 `npm run build`。
 
-推送到 main 后，GitHub Actions 会检查文章、构建站点，并编译 .NET 示例、运行不需要密钥的检查；两个任务都成功后才部署到 GitHub Pages。
+推送到 main 后，GitHub Actions 会检查文章、构建站点、编译 .NET 示例，并在 Docker 中验证 Nginx 实验；三个任务都成功后才部署到 GitHub Pages。
 Pull Request 会运行相同的检查和构建，但不会部署。
 
 ## GitHub Pages 设置

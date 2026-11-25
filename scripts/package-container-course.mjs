@@ -3,11 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // A deterministic source-only ZIP; never package build output or secrets.
-const allowed = /\.(cs|csproj|java|xml|properties|conf|sql|html|sh|json|md|yaml|yml)$/i;
+const allowed = /\.(cs|csproj|java|xml|properties|conf|sql|html|sh|json|md|yaml|yml|mjs|js|css|txt)$/i;
 
 function collect(directory, prefix = "") {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    if (["bin", "obj", "target", "backups", "scratch", "kind-logs", "audit-debug"].includes(entry.name) || (entry.name.startsWith(".") && ![".dockerignore", ".gitignore"].includes(entry.name))) return [];
+    if (["bin", "obj", "target", "backups", "scratch", "kind-logs", "audit-debug", "runtime", "certs"].includes(entry.name) || (entry.name.startsWith(".") && ![".dockerignore", ".gitignore"].includes(entry.name))) return [];
     const relative = `${prefix}${entry.name}`;
     if (entry.isDirectory()) return collect(path.join(directory, entry.name), `${relative}/`);
     return entry.isFile() && (allowed.test(entry.name) || ["Dockerfile", ".dockerignore", ".gitignore"].includes(entry.name))
@@ -57,3 +57,4 @@ function packageCourse(name) {
 packageCourse("container-course");
 packageCourse("docker-labs");
 packageCourse("k8s-labs");
+packageCourse("nginx-labs");

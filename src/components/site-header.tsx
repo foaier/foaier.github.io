@@ -6,6 +6,7 @@ const links = [
   { href: "/", label: "首页" },
   { href: "/learn/", label: "从零学 AI" },
   { href: "/containers/", label: "Docker & K8s" },
+  { href: "/nginx/", label: "Nginx" },
   { href: "/articles/", label: "文章" },
   { href: "/resume/", label: "简历" },
 ];

@@ -111,5 +111,16 @@
     "core": true,
     "inLearn": false,
     "recommended": []
+  },
+  {
+    "name": "Nginx 从入门到实战",
+    "id": "nginx",
+    "description": "从第一个网页开始，逐步接通代理、双后端、HTTPS，再练缓存、限流和排错。",
+    "audience": "第一次接触 Nginx，希望跟着命令练习的开发者",
+    "outcome": "能部署静态网站与 API 入口，解释请求的处理过程，并用日志定位常见故障。",
+    "start": "nginx-start",
+    "core": true,
+    "inLearn": false,
+    "recommended": []
   }
 ]

@@ -1,0 +1,1 @@
+This file comes from /srv/downloads/guide.txt, served through alias.

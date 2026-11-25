@@ -18,3 +18,6 @@ public/downloads/k8s-labs.zip
 examples/k8s-labs/scratch/
 examples/k8s-labs/kind-logs/
 examples/k8s-labs/audit-debug/
+public/downloads/nginx-labs.zip
+examples/nginx-labs/runtime/
+examples/nginx-labs/certs/
