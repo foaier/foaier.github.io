@@ -21,3 +21,5 @@ examples/k8s-labs/audit-debug/
 public/downloads/nginx-labs.zip
 examples/nginx-labs/runtime/
 examples/nginx-labs/certs/
+backups/resume/
+artifacts/resume/
